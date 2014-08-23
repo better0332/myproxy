@@ -1,9 +1,6 @@
 package proxy
 
 import (
-	"bitbucket.org/better0332/WebHunter/proxy/cacheLayer"
-	"bitbucket.org/better0332/WebHunter/proxy/db"
-	"bitbucket.org/better0332/WebHunter/queue"
 	"bufio"
 	"bytes"
 	"crypto/rand"
@@ -13,6 +10,9 @@ import (
 	"crypto/x509/pkix"
 	"errors"
 	"fmt"
+	"github.com/better0332/WebHunter/proxy/cacheLayer"
+	"github.com/better0332/WebHunter/proxy/db"
+	"github.com/better0332/WebHunter/queue"
 	"io"
 	"io/ioutil"
 	"log"

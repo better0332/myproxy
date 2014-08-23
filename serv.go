@@ -1,9 +1,9 @@
 package main
 
 import (
-	"bitbucket.org/better0332/WebHunter/proxy"
 	"bufio"
 	"flag"
+	"github.com/better0332/WebHunter/proxy"
 	"log"
 	"net"
 	"net/http"

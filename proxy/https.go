@@ -1,14 +1,10 @@
 package proxy
 
 import (
-	"bufio"
-	"bytes"
-	"crypto/tls"
-	"io"
-	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
-	"strings"
+	"time"
 )
 
 type HttpsProxy struct {
@@ -17,7 +13,7 @@ type HttpsProxy struct {
 }
 
 func (hs *HttpsProxy) HandleHttps() {
-	resp := Basic(hs.Req, "WebHunter")
+	resp := Basic(hs.Req, "myproxy")
 	if resp != nil {
 		defer resp.Body.Close()
 
@@ -28,69 +24,27 @@ func (hs *HttpsProxy) HandleHttps() {
 	hs.Target = hs.Req.URL.Host
 
 	log.Printf("CONNECT to %s\n", hs.Target)
+
+	bconn, err := net.Dial("tcp", hs.Target)
+	if err != nil {
+		log.Printf("failed to connect to %s: %s\n", hs.Target, err)
+		return
+	}
+	hs.Bconn = bconn
 	hs.Conn.Write([]byte("HTTP/1.0 200 OK\r\n\r\n"))
 
-	tlsCfg, err := TLSConfig(hs.Target, nil)
-	if err != nil {
-		log.Printf("%s\n", err)
-		return
-	}
-	clientTls := tls.Server(hs.Conn, tlsCfg)
-	if err := clientTls.Handshake(); err != nil {
-		log.Printf("Cannot handshake client %s %s\n", hs.Target, err)
-		return
-	}
+	remoteaddr := hs.Bconn.RemoteAddr().String()
+	log.Printf("connected to backend %s\n", remoteaddr)
 
-	log.Printf("ServerName: %s\n", clientTls.ConnectionState().ServerName)
+	defer func() {
+		hs.Bconn.Close()
+		log.Printf("disconnected from backend %s\n", remoteaddr)
+	}()
 
-	defer clientTls.Close()
-	clientTlsReader := bufio.NewReader(clientTls)
+	// reset deadline
+	// hs.Conn.SetDeadline(time.Now().Add(2 * time.Hour))
+	hs.Bconn.SetDeadline(time.Now().Add(2 * time.Minute))
 
-	req, err := http.ReadRequest(clientTlsReader)
-	if err != nil {
-		log.Println(err)
-		return
-	}
-
-	req.URL.Scheme = "https"
-	req.URL.Host = hs.Target
-	req.RequestURI = ""
-	// If no Accept-Encoding header exists, Transport will add the headers it can accept
-	// and would wrap the response body with the relevant reader.
-	acceptEncoding := req.Header.Get("Accept-Encoding")
-	if acceptEncoding != "" {
-		req.Header.Del("Accept-Encoding")
-	}
-	url := req.URL.String()
-	log.Printf("Got request %s %s\n", req.Method, url)
-
-	var body []byte
-	if req.ContentLength != 0 && req.Method == "POST" {
-		body, err = ioutil.ReadAll(io.LimitReader(req.Body, maxReq))
-		if err != nil {
-			log.Printf("Read Request body err: %s\n", err)
-			return
-		}
-
-		req.Body = &readerAndCloser{io.MultiReader(bytes.NewReader(body), req.Body), req.Body}
-	}
-
-	FixRequest(req)
-	if resp, err = client.Do(req); err != nil &&
-		strings.Index(err.Error(), forbiddenRedirect) == -1 {
-		log.Printf("client.Do err: %s\n", err)
-		return
-	}
-	FixResponse(resp)
-
-	if (resp.StatusCode == 200 && resp.Header.Get("ETag") == "" &&
-		resp.Header.Get("Last-Modified") == "") ||
-		resp.Header.Get("Location") != "" {
-		if pushUrl(url) {
-			go InsertHttpInfo(&httpInfo{req, resp.StatusCode, resp.ContentLength,
-				body, acceptEncoding})
-		}
-	}
-
-	resp.Write(clientTls)
+	// proxying
+	hs.proxying()
 }

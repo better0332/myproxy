@@ -15,7 +15,7 @@ type HttpProxy struct {
 }
 
 func (h *HttpProxy) HandleHttp() {
-	resp := Basic(h.Req, "WebHunter")
+	resp := Basic(h.Req, "myproxy")
 	if resp == nil {
 		h.Target = h.Req.URL.Host
 		url := h.Req.URL.String()
@@ -43,21 +43,10 @@ func (h *HttpProxy) HandleHttp() {
 			h.Req.Body = &readerAndCloser{io.MultiReader(bytes.NewReader(body), h.Req.Body), h.Req.Body}
 		}
 
-		FixRequest(h.Req)
 		if resp, err = client.Do(h.Req); err != nil &&
 			strings.Index(err.Error(), forbiddenRedirect) == -1 {
 			log.Printf("client.Do err: %s\n", err)
 			return
-		}
-		FixResponse(resp)
-
-		if (resp.StatusCode == 200 && resp.Header.Get("ETag") == "" &&
-			resp.Header.Get("Last-Modified") == "") ||
-			resp.Header.Get("Location") != "" {
-			if pushUrl(url) {
-				go InsertHttpInfo(&httpInfo{h.Req, resp.StatusCode, resp.ContentLength,
-					body, acceptEncoding})
-			}
 		}
 	}
 

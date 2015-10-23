@@ -3,46 +3,37 @@ package main
 import (
 	"bufio"
 	"flag"
-	"github.com/better0332/WebHunter/proxy"
 	"log"
 	"net"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
-	"path/filepath"
-	"runtime"
 	"strconv"
 	"time"
+
+	"github.com/better0332/myproxy/proxy"
 )
 
 var (
 	profile = flag.Bool("profile", false, "enable pprof")
-	port    = flag.Uint("port", 1080, "listen port")
+	port    = flag.Uint("port", 443, "listen port")
 )
-
-func init() {
-	runtime.GOMAXPROCS(runtime.NumCPU())
-
-	if err := os.Chdir(filepath.Dir(os.Args[0])); err != nil {
-		log.Fatalln(err)
-	}
-	if err := proxy.InitCA(); err != nil {
-		log.Fatalln("Failed to init root cert: ", err)
-	}
-}
 
 func handleConnection(conn net.Conn) {
 	clientaddr := proxy.MakeSockAddr(conn.RemoteAddr().String())
 	log.Printf("accepted from frontend %s\n", clientaddr.String())
 
+	var s5 bool
+
 	defer func() {
 		if err := recover(); err != nil {
-			log.Printf("an error occurred with frontend %s: %v\n",
-				clientaddr.String(), err)
+			log.Printf("an error occurred with frontend %s: %v\n", clientaddr.String(), err)
 		}
 
-		conn.Close()
-		log.Printf("disconnected from frontend %s\n", clientaddr.String())
+		if !s5 {
+			log.Printf("disconnected from frontend %s\n", clientaddr.String())
+			conn.Close()
+		}
 	}()
 
 	conn.SetDeadline(time.Now().Add(30 * time.Second))
@@ -58,7 +49,7 @@ func handleConnection(conn net.Conn) {
 		log.Println("may be socks5!")
 		socks5 := new(proxy.Socks5)
 		socks5.Conn, socks5.ConnBufRead = conn, connBufRead
-		socks5.HandleSocks5()
+		s5 = socks5.HandleSocks5()
 		return
 	} else if flag[0] == 0x04 {
 		log.Println("may be socks4(a)!")
@@ -90,7 +81,7 @@ func handleConnection(conn net.Conn) {
 func main() {
 	flag.Parse()
 
-	listenaddr := "0.0.0.0:" + strconv.Itoa(int(*port))
+	listenaddr := ":" + strconv.Itoa(int(*port))
 	ln, err := net.Listen("tcp", listenaddr)
 	if err != nil {
 		log.Printf("Listen error: %s\n", err)

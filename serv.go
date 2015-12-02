@@ -2,12 +2,18 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+	"crypto/md5"
+	"crypto/tls"
+	"encoding/json"
 	"flag"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	"runtime"
 	"strconv"
 	"time"
 
@@ -15,13 +21,18 @@ import (
 )
 
 var (
-	profile = flag.Bool("profile", false, "enable pprof")
-	port    = flag.Uint("port", 443, "listen port")
+	server       = flag.String("server", ":443", "server listen address")
+	hostname     = flag.String("host", "", "server hostname, default HOSTNAME(1)")
+	udpRelayCIDR = flag.String("relay", "", "udp relay CIDR")
+	all          = flag.Bool("all", false, "get all accounts")
+
+	tr     = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true} /*DisableCompression: true*/}
+	client = &http.Client{Transport: tr}
 )
 
 func handleConnection(conn net.Conn) {
 	clientaddr := proxy.MakeSockAddr(conn.RemoteAddr().String())
-	log.Printf("accepted from frontend %s\n", clientaddr.String())
+	//log.Printf("accepted from frontend %s\n", clientaddr.String())
 
 	var s5 bool
 
@@ -31,7 +42,7 @@ func handleConnection(conn net.Conn) {
 		}
 
 		if !s5 {
-			log.Printf("disconnected from frontend %s\n", clientaddr.String())
+			//log.Printf("disconnected from frontend %s\n", clientaddr.String())
 			conn.Close()
 		}
 	}()
@@ -46,12 +57,12 @@ func handleConnection(conn net.Conn) {
 	}
 
 	if flag[0] == 0x05 {
-		log.Println("may be socks5!")
+		//log.Println("may be socks5!")
 		socks5 := new(proxy.Socks5)
 		socks5.Conn, socks5.ConnBufRead = conn, connBufRead
 		s5 = socks5.HandleSocks5()
 		return
-	} else if flag[0] == 0x04 {
+	} /*else if flag[0] == 0x04 {
 		log.Println("may be socks4(a)!")
 		socks4 := new(proxy.Socks4)
 		socks4.Conn, socks4.ConnBufRead = conn, connBufRead
@@ -75,25 +86,132 @@ func handleConnection(conn net.Conn) {
 		httpProxy.Conn, httpProxy.ConnBufRead = conn, connBufRead
 		httpProxy.Req = req
 		httpProxy.HandleHttp()
+	}*/
+}
+
+func accountSetHandler(w http.ResponseWriter, req *http.Request) {
+	log.Println("enter accountSetHandler...")
+
+	user := req.Header.Get("username")
+	pwd := req.Header.Get("password")
+	logEnable := req.Header.Get("log_enable")
+	relayEnable := req.Header.Get("relay_enable")
+	timeStamp := req.Header.Get("timestamp")
+	token := req.Header.Get("token")
+
+	stamp, _ := strconv.ParseInt(timeStamp, 10, 0)
+	if time.Now().Unix()-stamp > 1800 {
+		w.Write([]byte("timestamp is expired!"))
+		return
+	}
+	t := fmt.Sprint("%x", md5.Sum([]byte(user+pwd+logEnable+relayEnable+timeStamp+"^_^")))
+	if t != token {
+		w.Write([]byte("token is invalid!"))
+		return
+	}
+
+	if user == "" || pwd == "" {
+		w.Write([]byte("username or password is empty!"))
+		return
+	}
+	var bLog, bRelay bool
+	if logEnable == "1" {
+		bLog = true
+	}
+	if relayEnable == "1" {
+		bRelay = true
+	}
+
+	proxy.SetAccount(user, pwd, bLog, bRelay)
+
+	w.Write([]byte("ok"))
+}
+
+func accountDelHandler(w http.ResponseWriter, req *http.Request) {
+	log.Println("enter accountDelHandler...")
+
+	user := req.Header.Get("username")
+	timeStamp := req.Header.Get("timestamp")
+	token := req.Header.Get("token")
+
+	stamp, _ := strconv.ParseInt(timeStamp, 10, 0)
+	if time.Now().Unix()-stamp > 1800 {
+		w.Write([]byte("timestamp is expired!"))
+		return
+	}
+	t := fmt.Sprint("%x", md5.Sum([]byte(user+timeStamp+"^_^")))
+	if t != token {
+		w.Write([]byte("token is invalid!"))
+		return
+	}
+
+	if user == "" {
+		w.Write([]byte("username is empty!"))
+		return
+	}
+
+	proxy.DelAccount(user)
+
+	w.Write([]byte("ok"))
+}
+
+func httpServer() {
+	http.HandleFunc("/account/set", accountSetHandler)
+	http.HandleFunc("/account/del", accountDelHandler)
+
+	log.Fatal(http.ListenAndServe(":6061", nil))
+}
+
+func postUserTrans() {
+	for {
+		time.Sleep(1 * time.Minute)
+
+		trans := proxy.GetAccountTrans()
+		b, _ := json.Marshal(&trans)
+		resp, err := client.Post("https://speedmao.com/usertrans", "application/json", bytes.NewReader(b))
+		if err != nil {
+			log.Println(err)
+			continue
+		}
+		if resp.StatusCode != 200 {
+			log.Println(resp.Status)
+		}
+		resp.Body.Close()
 	}
 }
 
 func main() {
 	flag.Parse()
 
-	listenaddr := ":" + strconv.Itoa(int(*port))
-	ln, err := net.Listen("tcp", listenaddr)
-	if err != nil {
-		log.Printf("Listen error: %s\n", err)
-		os.Exit(1)
-	}
-	log.Printf("listening on %s...\n", listenaddr)
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
-	if *profile {
-		go func() {
-			log.Println(http.ListenAndServe("localhost:6060", nil))
-		}()
+	var err error
+	if !*all {
+		if *hostname == "" {
+			if *hostname, err = os.Hostname(); err != nil {
+				log.Fatal("get os hostname error:", err)
+			}
+		}
+	} else {
+		*hostname = ""
 	}
+	if _, proxy.UdpRelayIpNet, err = net.ParseCIDR(*udpRelayCIDR); *udpRelayCIDR != "" && err != nil {
+		log.Fatal("udp relay CIDR format error:", err)
+	}
+
+	proxy.InitAccountMap(*hostname)
+	log.Println("initAccountMap ok")
+
+	runtime.GOMAXPROCS(runtime.NumCPU())
+
+	ln, err := net.Listen("tcp", *server)
+	if err != nil {
+		log.Fatal("Listen error: %s\n", err)
+	}
+	log.Printf("listening on %s...\n", *server)
+
+	go httpServer()
+	go postUserTrans()
 
 	for {
 		conn, err := ln.Accept()

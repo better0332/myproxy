@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"strings"
 	"time"
 )
 
@@ -47,7 +48,7 @@ func (s4 *Socks4) HandleSocks4() {
 			panic("domain name too long!")
 		}
 		s4.Target = fmt.Sprintf("%s:%d", domain, int(buf1[2])<<8+int(buf1[3]))
-		s4.Domain = domain
+		s4.Domain = strings.ToLower(domain)
 	}
 
 	s4.handleConnect()

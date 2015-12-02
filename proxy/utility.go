@@ -5,14 +5,15 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
-	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/better0332/myproxy/queue"
 )
@@ -45,6 +46,44 @@ var (
 	reDomain1 = regexp.MustCompile(`[^\.]+\.(?:com|net|org|gov|edu)\.[a-z]{2}$`)
 	reDomain2 = regexp.MustCompile(`[^\.]+\.(?:ac|bj|sh|tj|cq|he|sx|nm|ln|jl|hl|js|zj|ah|fj|jx|sd|ha|hb|hn|gd|gx|hi|sc|gz|yn|xz|sn|gs|qh|nx|xj|tw|hk|mo)\.cn$`)
 	reDomain3 = regexp.MustCompile(`[^\.]+\.[^\.]+$`)
+
+	blockdomain = []string{
+		"baidu.com",
+		"qq.com",
+		"163.com",
+		"youku.com",
+		"iqiyi.com",
+		"sohu.com",
+		"weibo.com",
+		"bilibili.com",
+		"acfun.tv",
+		"hunantv.com",
+		"letv.com",
+		"cntv.cn",
+		"taobao.com",
+		"jd.com",
+		"tmall.com",
+		"sina.com.cn",
+		"onlinedown.net",
+		"skycn.com",
+		"xunlei.com",
+		"verycd.com",
+		"kugou.com",
+		"tudou.com",
+		"pptv.com",
+		"kankan.com",
+		"360.com",
+		"360.cn",
+		"360safe.com",
+		"58.com",
+		"ganji.com",
+		"proxycap.com",
+		"localhost",
+	}
+
+	account = accountMap{m: make(map[string]*accountInfo, 200)}
+
+	UdpRelayIpNet *net.IPNet
 )
 
 type Proxy struct {
@@ -52,8 +91,14 @@ type Proxy struct {
 	ConnBufRead *bufio.Reader
 	Bconn       net.Conn
 
-	Target string
-	Domain string
+	User string
+	Info *accountInfo
+
+	Target  string
+	Domain  string
+	TcpPort uint
+
+	tcpId int64
 
 	Quit chan bool
 }
@@ -74,6 +119,84 @@ type httpInfo struct {
 	respConLen     int64
 	body           []byte
 	acceptEncoding string
+}
+
+type accountInfo struct {
+	pwd         string
+	logEnable   bool
+	relayEnable bool
+
+	transfer int64
+}
+
+type accountMap struct {
+	m map[string]*accountInfo
+	l sync.RWMutex
+}
+
+func GetAccountTrans() map[string]int64 {
+	trans := make(map[string]int64, 200)
+
+	account.l.RLock()
+	for user, info := range account.m {
+		if v := atomic.LoadInt64(&info.transfer); v > 0 {
+			trans[user] = v
+			atomic.StoreInt64(&info.transfer, 0)
+		}
+	}
+	account.l.RUnlock()
+
+	return trans
+}
+
+func GetAccountInfo(user string) *accountInfo {
+	account.l.RLock()
+	defer account.l.RUnlock()
+
+	info, _ := account.m[user]
+	return info
+}
+
+func SetAccount(user, pwd string, logEnable, relayEnable bool) {
+	account.l.Lock()
+	defer account.l.Unlock()
+
+	account.m[user] = &accountInfo{pwd, logEnable, relayEnable, 0}
+}
+
+func DelAccount(user string) {
+	account.l.Lock()
+	defer account.l.Unlock()
+
+	delete(account.m, user)
+}
+
+func InitAccountMap(host string) {
+	SetAccountMap(account.m, host)
+}
+
+func isBlockDomain(domain string) bool {
+	for i := 0; i < len(blockdomain); i++ {
+		if strings.HasSuffix(domain, blockdomain[i]) {
+			return true
+		}
+	}
+	return false
+}
+
+func isBlockIP(ip string) bool {
+	return strings.HasPrefix(ip, "127.") ||
+		strings.HasPrefix(ip, "10.") ||
+		strings.HasPrefix(ip, "192.168.") ||
+		strings.HasPrefix(ip, "172.16.") ||
+		strings.HasPrefix(ip, "0.") ||
+		strings.HasPrefix(ip, "255.")
+}
+
+func isBlockPort(port uint) bool {
+	return port == 3077 || port == 3076 ||
+		port == 7777 || port == 7778 || port == 11300 ||
+		port == 4662 || port == 4661 || port == 4242 || port == 4371
 }
 
 func pushUrl(url string) bool {
@@ -99,8 +222,10 @@ func redirectPolicy(req *http.Request, via []*http.Request) error {
 
 // Convert a "host:port" string to SockAddr
 func MakeSockAddr(HostPort string) SockAddr {
-	pair := strings.Split(HostPort, ":")
-	host, portstr := pair[0], pair[1]
+	host, portstr, err := net.SplitHostPort(HostPort)
+	if err != nil {
+		panic(err)
+	}
 	port, err := strconv.Atoi(portstr)
 	if err != nil {
 		panic(err)
@@ -109,7 +234,7 @@ func MakeSockAddr(HostPort string) SockAddr {
 }
 
 func (addr *SockAddr) String() string {
-	return fmt.Sprintf("%s:%d", addr.Host, addr.Port)
+	return net.JoinHostPort(addr.Host, strconv.Itoa(addr.Port))
 }
 
 func (addr *SockAddr) ByteArray() []byte {
@@ -170,12 +295,42 @@ func (proxy *Proxy) iobridge(dst, src io.ReadWriter) {
 	go func() {
 		defer func() { proxy.Quit <- true }()
 
-		io.Copy(dst, src)
+		var total int64
+		for {
+			n, err := io.CopyN(dst, src, 64<<10)
+			if n > 0 && proxy.Info.logEnable {
+				total += n
+				if len(CacheChan) < cap(CacheChan) {
+					CacheChan <- &UpdateTcpST{proxy.tcpId, n}
+				} else {
+					log.Printf("[%s]CacheChan is full drop tcpid %d\n", proxy.User, proxy.tcpId)
+				}
+			}
+			if err != nil {
+				break
+			}
+		}
+		atomic.AddInt64(&proxy.Info.transfer, total)
 	}()
 	go func() {
 		defer func() { proxy.Quit <- true }()
 
-		io.Copy(src, dst)
+		var total int64
+		for {
+			n, err := io.CopyN(src, dst, 64<<10)
+			if n > 0 && proxy.Info.logEnable {
+				total += n
+				if len(CacheChan) < cap(CacheChan) {
+					CacheChan <- &UpdateTcpST{proxy.tcpId, n}
+				} else {
+					log.Printf("[%s]CacheChan is full drop tcpid %d\n", proxy.User, proxy.tcpId)
+				}
+			}
+			if err != nil {
+				break
+			}
+		}
+		atomic.AddInt64(&proxy.Info.transfer, total)
 	}()
 
 	<-proxy.Quit // wait for either side to close

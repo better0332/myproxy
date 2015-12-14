@@ -2,22 +2,34 @@ package proxy
 
 import (
 	"database/sql"
+	"sync/atomic"
 
 	_ "github.com/go-sql-driver/mysql"
 )
 
 var db *sql.DB
 var stmtInsertTcpLog, stmtUpdateTcp, stmtStopTcp, stmtInsertUpdateUdpLog *sql.Stmt
-var CacheChan = make(chan interface{}, 100)
+var CacheChan = make(chan interface{}, 2000)
+
+type InsertTcpLogST struct {
+	tcpId                                                  *int64
+	username, proxyType, clientAddr, remoteAddr, starttime string
+}
 
 type UpdateTcpST struct {
-	Id, Transfer int64
+	id, transfer int64
 }
 
 type InsertUpdateUdpLogST struct {
-	Tid        int64
-	RemoteAddr string
-	Transfer   int
+	tid        int64
+	remoteAddr string
+	transfer   int
+	addtime    string
+}
+
+type StopTcpST struct {
+	id      int64
+	endtime string
 }
 
 func init() {
@@ -31,20 +43,20 @@ func init() {
 	if err = db.Ping(); err != nil {
 		panic(err)
 	}
-	if stmtInsertTcpLog, err = db.Prepare(`insert into tcp_log(username, proxy_type, client_addr, remote_addr, starttime) VALUES(?, ?, ?, ?, now())`); err != nil {
+	if stmtInsertTcpLog, err = db.Prepare(`insert into tcp_log(username, proxy_type, client_addr, remote_addr, starttime) VALUES(?, ?, ?, ?, ?)`); err != nil {
 		panic(err)
 	}
 	if stmtUpdateTcp, err = db.Prepare(`update tcp_log set transfer=transfer+? where id=?`); err != nil {
 		panic(err)
 	}
-	if stmtStopTcp, err = db.Prepare(`update tcp_log set endtime=now() where id=?`); err != nil {
+	if stmtStopTcp, err = db.Prepare(`update tcp_log set endtime=? where id=?`); err != nil {
 		panic(err)
 	}
-	if stmtInsertUpdateUdpLog, err = db.Prepare(`insert into udp_log(tid, remote_addr, transfer, addtime) VALUES(?, ?, ?, now()) on duplicate key update transfer=transfer+?`); err != nil {
+	if stmtInsertUpdateUdpLog, err = db.Prepare(`insert into udp_log(tid, remote_addr, transfer, addtime) VALUES(?, ?, ?, ?) on duplicate key update transfer=transfer+?`); err != nil {
 		panic(err)
 	}
 
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 8; i++ {
 		go handleSQL()
 	}
 }
@@ -53,16 +65,20 @@ func handleSQL() {
 	for {
 		inter := <-CacheChan
 		switch inst := inter.(type) {
+		case *InsertTcpLogST:
+			atomic.StoreInt64(inst.tcpId, InsertTcpLog(inst.username, inst.proxyType, inst.clientAddr, inst.remoteAddr, inst.starttime))
 		case *UpdateTcpST:
-			UpdateTcp(inst.Id, inst.Transfer)
+			UpdateTcp(inst.id, inst.transfer)
 		case *InsertUpdateUdpLogST:
-			InsertUpdateUdpLog(inst.Tid, inst.RemoteAddr, inst.Transfer)
+			InsertUpdateUdpLog(inst.tid, inst.remoteAddr, inst.transfer, inst.addtime)
+		case *StopTcpST:
+			StopTcp(inst.id, inst.endtime)
 		}
 	}
 }
 
-func InsertTcpLog(username, proxy_type, client_addr, remote_addr string) int64 {
-	rlt, err := stmtInsertTcpLog.Exec(username, proxy_type, client_addr, remote_addr)
+func InsertTcpLog(username, proxyType, clientAddr, remoteAddr, starttime string) int64 {
+	rlt, err := stmtInsertTcpLog.Exec(username, proxyType, clientAddr, remoteAddr, starttime)
 	if err != nil {
 		return 0
 	}
@@ -70,16 +86,16 @@ func InsertTcpLog(username, proxy_type, client_addr, remote_addr string) int64 {
 	return id
 }
 
-func UpdateTcp(id int64, transfer int64) {
+func UpdateTcp(id, transfer int64) {
 	stmtUpdateTcp.Exec(transfer, id)
 }
 
-func StopTcp(id int64) {
-	stmtStopTcp.Exec(id)
+func StopTcp(id int64, endtime string) {
+	stmtStopTcp.Exec(id, endtime)
 }
 
-func InsertUpdateUdpLog(tid int64, remote_addr string, transfer int) {
-	stmtInsertUpdateUdpLog.Exec(tid, remote_addr, transfer, transfer)
+func InsertUpdateUdpLog(tid int64, remoteAddr string, transfer int, addtime string) {
+	stmtInsertUpdateUdpLog.Exec(tid, remoteAddr, transfer, addtime, transfer)
 }
 
 func SetAccountMap(m map[string]*accountInfo, h string) {
@@ -90,9 +106,9 @@ func SetAccountMap(m map[string]*accountInfo, h string) {
 
 	var rows *sql.Rows
 	if h == "" {
-		rows, err = db.Query(`select username, password, log_enable, relay_enable from account, order_list where order_id=order_list.id and disable=0 and money>0`)
+		rows, err = db.Query(`select username, password, log_enable, relay_server from account, order_list where order_id=order_list.id and disable=0 and money>0`)
 	} else {
-		rows, err = db.Query(`select username, password, log_enable, relay_enable from account, order_list where order_id=order_list.id and server=? and disable=0 and money>0`, h)
+		rows, err = db.Query(`select username, password, log_enable, relay_server from account, order_list where order_id=order_list.id and server=? and disable=0 and money>0`, h)
 	}
 	if err != nil {
 		panic(err)
@@ -102,16 +118,12 @@ func SetAccountMap(m map[string]*accountInfo, h string) {
 	for rows.Next() {
 		var username string
 		var logEnable int
-		var relayEnable int
 		info := accountInfo{}
-		if err = rows.Scan(&username, &info.pwd, &logEnable, &relayEnable); err != nil {
+		if err = rows.Scan(&username, &info.pwd, &info.relayServer, &logEnable); err != nil {
 			panic(err)
 		}
 		if logEnable > 0 {
 			info.logEnable = true
-		}
-		if relayEnable > 0 {
-			info.relayEnable = true
 		}
 		m[username] = &info
 	}

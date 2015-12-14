@@ -50,7 +50,11 @@ func (s5 *Socks5) handleSocks5_() {
 		s5.Conn.Close()
 
 		if s5.Info.logEnable {
-			StopTcp(s5.tcpId)
+			if id := s5.getTcpId(); id > 0 && len(CacheChan) < cap(CacheChan) {
+				CacheChan <- &StopTcpST{id, time.Now().Format("2006-01-02 15:04:05")}
+			} else {
+				log.Printf("[%s][StopTcp]CacheChan is full drop tcpid %d\n", s5.User, id)
+			}
 		}
 	}()
 
@@ -104,8 +108,8 @@ func (s5 *Socks5) handleSocks5_() {
 
 		var host string
 		ip := s5.Conn.RemoteAddr().(*net.TCPAddr).IP
-		if UdpRelayIpNet != nil && UdpRelayIpNet.Contains(ip) {
-			if !s5.Info.relayEnable {
+		if IsIpContains(ip) {
+			if s5.Info.relayServer == "" {
 				log.Printf("%s can't relay sock5 proxy\n", s5.User)
 				s5.Conn.Write(errorReplySocks5(0x05)) // connection refused
 				return
@@ -128,8 +132,8 @@ func (s5 *Socks5) handleSocks5_() {
 		s5.Conn.SetDeadline(time.Time{})
 		s5.newConeMap()
 
-		if s5.Info.logEnable {
-			s5.tcpId = InsertTcpLog(s5.User, "UDP", s5.Conn.RemoteAddr().String(), "")
+		if s5.Info.logEnable && len(CacheChan) < cap(CacheChan) {
+			CacheChan <- &InsertTcpLogST{s5.TcpId, s5.User, "UDP", s5.Conn.RemoteAddr().String(), "", time.Now().Format("2006-01-02 15:04:05")}
 		}
 
 		go s5.handleUDP()
@@ -218,10 +222,10 @@ func (s5 *Socks5) handleUDP() {
 			s5.UDPConn.WriteToUDP(data, rus.udpAddr)
 
 			if s5.Info.logEnable {
-				if len(CacheChan) < cap(CacheChan) {
-					CacheChan <- &InsertUpdateUdpLogST{s5.tcpId, udpAddr.String(), len(buf)}
+				if id := s5.getTcpId(); id > 0 && len(CacheChan) < cap(CacheChan) {
+					CacheChan <- &InsertUpdateUdpLogST{id, udpAddr.String(), len(buf), time.Now().Format("2006-01-02 15:04:05")}
 				} else {
-					log.Printf("[%s]CacheChan is full drop tcpid %d\n", s5.User, s5.tcpId)
+					log.Printf("[%s][InsertUpdateUdpLogST]CacheChan is full drop tcpid %d\n", s5.User, id)
 				}
 			}
 			atomic.AddInt64(&s5.Info.transfer, int64(len(buf)))
@@ -265,10 +269,10 @@ func (s5 *Socks5) handleUDP() {
 			n, _ := s5.UDPConn.WriteToUDP(udpData, remoteAddr)
 
 			if s5.Info.logEnable {
-				if len(CacheChan) < cap(CacheChan) {
-					CacheChan <- &InsertUpdateUdpLogST{s5.tcpId, remoteAddr.String(), n}
+				if id := s5.getTcpId(); id > 0 && len(CacheChan) < cap(CacheChan) {
+					CacheChan <- &InsertUpdateUdpLogST{id, remoteAddr.String(), n, time.Now().Format("2006-01-02 15:04:05")}
 				} else {
-					log.Printf("[%s]CacheChan is full drop tcpid %d\n", s5.User, s5.tcpId)
+					log.Printf("[%s][InsertUpdateUdpLogST]CacheChan is full drop tcpid %d\n", s5.User, id)
 				}
 
 			}
@@ -305,8 +309,8 @@ func (s5 *Socks5) handleConnect() {
 	// s5.Conn.SetDeadline(time.Now().Add(2 * time.Hour))
 	s5.Bconn.SetDeadline(time.Now().Add(2 * time.Minute))
 
-	if s5.Info.logEnable {
-		s5.tcpId = InsertTcpLog(s5.User, "TCP", s5.Conn.RemoteAddr().String(), s5.Target)
+	if s5.Info.logEnable && len(CacheChan) < cap(CacheChan) {
+		CacheChan <- &InsertTcpLogST{s5.TcpId, s5.User, "TCP", s5.Conn.RemoteAddr().String(), s5.Target, time.Now().Format("2006-01-02 15:04:05")}
 	}
 
 	// proxying

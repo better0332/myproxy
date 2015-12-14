@@ -15,6 +15,7 @@ import (
 	"os"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/better0332/myproxy/proxy"
@@ -23,7 +24,7 @@ import (
 var (
 	server       = flag.String("server", ":443", "server listen address")
 	hostname     = flag.String("host", "", "server hostname, default HOSTNAME(1)")
-	udpRelayCIDR = flag.String("relay", "", "udp relay CIDR")
+	udpRelayCIDR = flag.String("relay", "", "udp relay CIDR(multi split by comma)")
 	all          = flag.Bool("all", false, "get all accounts")
 
 	tr     = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true} /*DisableCompression: true*/}
@@ -59,7 +60,8 @@ func handleConnection(conn net.Conn) {
 	if flag[0] == 0x05 {
 		//log.Println("may be socks5!")
 		socks5 := new(proxy.Socks5)
-		socks5.Conn, socks5.ConnBufRead = conn, connBufRead
+		var tcpId int64 = 0
+		socks5.Conn, socks5.ConnBufRead, socks5.TcpId = conn, connBufRead, &tcpId
 		s5 = socks5.HandleSocks5()
 		return
 	} /*else if flag[0] == 0x04 {
@@ -95,7 +97,7 @@ func accountSetHandler(w http.ResponseWriter, req *http.Request) {
 	user := req.Header.Get("username")
 	pwd := req.Header.Get("password")
 	logEnable := req.Header.Get("log_enable")
-	relayEnable := req.Header.Get("relay_enable")
+	relayServer := req.Header.Get("relay_server")
 	timeStamp := req.Header.Get("timestamp")
 	token := req.Header.Get("token")
 
@@ -104,7 +106,7 @@ func accountSetHandler(w http.ResponseWriter, req *http.Request) {
 		w.Write([]byte("timestamp is expired!"))
 		return
 	}
-	t := fmt.Sprint("%x", md5.Sum([]byte(user+pwd+logEnable+relayEnable+timeStamp+"^_^")))
+	t := fmt.Sprint("%x", md5.Sum([]byte(user+pwd+logEnable+relayServer+timeStamp+"^_^")))
 	if t != token {
 		w.Write([]byte("token is invalid!"))
 		return
@@ -114,15 +116,12 @@ func accountSetHandler(w http.ResponseWriter, req *http.Request) {
 		w.Write([]byte("username or password is empty!"))
 		return
 	}
-	var bLog, bRelay bool
+	var bLog bool
 	if logEnable == "1" {
 		bLog = true
 	}
-	if relayEnable == "1" {
-		bRelay = true
-	}
 
-	proxy.SetAccount(user, pwd, bLog, bRelay)
+	proxy.SetAccount(user, pwd, relayServer, bLog)
 
 	w.Write([]byte("ok"))
 }
@@ -174,7 +173,7 @@ func postUserTrans() {
 			continue
 		}
 		if resp.StatusCode != 200 {
-			log.Println(resp.Status)
+			log.Println("postUserTrans fail:", resp.Status)
 		}
 		resp.Body.Close()
 	}
@@ -195,8 +194,14 @@ func main() {
 	} else {
 		*hostname = ""
 	}
-	if _, proxy.UdpRelayIpNet, err = net.ParseCIDR(*udpRelayCIDR); *udpRelayCIDR != "" && err != nil {
-		log.Fatal("udp relay CIDR format error:", err)
+	for _, cidr := range strings.Split(*udpRelayCIDR, ",") {
+		if cidr = strings.TrimSpace(cidr); cidr != "" {
+			if _, ipnet, err := net.ParseCIDR(cidr); err == nil {
+				proxy.AppendIpNets(ipnet)
+			} else {
+				log.Printf("%s udp relay CIDR format error: %v\n", cidr, err)
+			}
+		}
 	}
 
 	proxy.InitAccountMap(*hostname)

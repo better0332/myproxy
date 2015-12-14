@@ -83,8 +83,21 @@ var (
 
 	account = accountMap{m: make(map[string]*accountInfo, 200)}
 
-	UdpRelayIpNet *net.IPNet
+	udpRelayIpNets []*net.IPNet
 )
+
+func AppendIpNets(ipnet *net.IPNet) {
+	udpRelayIpNets = append(udpRelayIpNets, ipnet)
+}
+
+func IsIpContains(ip net.IP) bool {
+	for _, ipnet := range udpRelayIpNets {
+		if ipnet.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
 
 type Proxy struct {
 	Conn        net.Conn
@@ -98,7 +111,7 @@ type Proxy struct {
 	Domain  string
 	TcpPort uint
 
-	tcpId int64
+	TcpId *int64
 
 	Quit chan bool
 }
@@ -123,8 +136,8 @@ type httpInfo struct {
 
 type accountInfo struct {
 	pwd         string
+	relayServer string
 	logEnable   bool
-	relayEnable bool
 
 	transfer int64
 }
@@ -139,9 +152,8 @@ func GetAccountTrans() map[string]int64 {
 
 	account.l.RLock()
 	for user, info := range account.m {
-		if v := atomic.LoadInt64(&info.transfer); v > 0 {
+		if v := atomic.SwapInt64(&info.transfer, 0); v > 0 {
 			trans[user] = v
-			atomic.StoreInt64(&info.transfer, 0)
 		}
 	}
 	account.l.RUnlock()
@@ -157,11 +169,11 @@ func GetAccountInfo(user string) *accountInfo {
 	return info
 }
 
-func SetAccount(user, pwd string, logEnable, relayEnable bool) {
+func SetAccount(user, pwd, relayServer string, logEnable bool) {
 	account.l.Lock()
 	defer account.l.Unlock()
 
-	account.m[user] = &accountInfo{pwd, logEnable, relayEnable, 0}
+	account.m[user] = &accountInfo{pwd, relayServer, logEnable, 0}
 }
 
 func DelAccount(user string) {
@@ -285,6 +297,14 @@ func getDomain(host string) string {
 	return ""
 }
 
+func (proxy *Proxy) setTcpId(id int64) {
+	atomic.StoreInt64(proxy.TcpId, id)
+}
+
+func (proxy *Proxy) getTcpId() int64 {
+	return atomic.LoadInt64(proxy.TcpId)
+}
+
 func (proxy *Proxy) proxying() {
 	proxy.iobridge(proxy.Bconn, proxy.Conn)
 }
@@ -300,10 +320,10 @@ func (proxy *Proxy) iobridge(dst, src io.ReadWriter) {
 			n, err := io.CopyN(dst, src, 64<<10)
 			if n > 0 && proxy.Info.logEnable {
 				total += n
-				if len(CacheChan) < cap(CacheChan) {
-					CacheChan <- &UpdateTcpST{proxy.tcpId, n}
+				if id := proxy.getTcpId(); id > 0 && len(CacheChan) < cap(CacheChan) {
+					CacheChan <- &UpdateTcpST{id, n}
 				} else {
-					log.Printf("[%s]CacheChan is full drop tcpid %d\n", proxy.User, proxy.tcpId)
+					log.Printf("[%s][UpdateTcpST]CacheChan is full drop tcpid %d\n", proxy.User, id)
 				}
 			}
 			if err != nil {
@@ -320,10 +340,10 @@ func (proxy *Proxy) iobridge(dst, src io.ReadWriter) {
 			n, err := io.CopyN(src, dst, 64<<10)
 			if n > 0 && proxy.Info.logEnable {
 				total += n
-				if len(CacheChan) < cap(CacheChan) {
-					CacheChan <- &UpdateTcpST{proxy.tcpId, n}
+				if id := proxy.getTcpId(); id > 0 && len(CacheChan) < cap(CacheChan) {
+					CacheChan <- &UpdateTcpST{id, n}
 				} else {
-					log.Printf("[%s]CacheChan is full drop tcpid %d\n", proxy.User, proxy.tcpId)
+					log.Printf("[%s][UpdateTcpST]CacheChan is full drop tcpid %d\n", proxy.User, id)
 				}
 			}
 			if err != nil {

@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"database/sql"
+	"net"
 	"sync/atomic"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -116,15 +117,14 @@ func SetAccountMap(m map[string]*accountInfo, h string) {
 	defer rows.Close()
 
 	for rows.Next() {
-		var username string
 		var logEnable int
-		info := accountInfo{}
-		if err = rows.Scan(&username, &info.pwd, &info.relayServer, &logEnable); err != nil {
+		info := accountInfo{connMap: make(map[net.Conn]int, 10)}
+		if err = rows.Scan(&info.User, &info.pwd, &info.relayServer, &logEnable); err != nil {
 			panic(err)
 		}
 		if logEnable > 0 {
 			info.logEnable = true
 		}
-		m[username] = &info
+		m[info.User] = &info
 	}
 }

@@ -48,6 +48,7 @@ func (s5 *Socks5) handleSocks5_() {
 		}
 		//log.Printf("[%s]disconnected from frontend %s\n", s5.User, s5.Conn.RemoteAddr())
 		s5.Conn.Close()
+		s5.freeConn()
 
 		if s5.Info.logEnable {
 			if id := s5.getTcpId(); id > 0 && len(CacheChan) < cap(CacheChan) {
@@ -90,13 +91,27 @@ func (s5 *Socks5) handleSocks5_() {
 			s5.Conn.Write(errorReplySocks5(0x08)) // address type not supported
 			return
 		}
+
 		if isBlockPort(s5.TcpPort) {
 			s5.Conn.Write(errorReplySocks5(0x05)) // connection refused
 			return
 		}
 		s5.Target = fmt.Sprintf("%s:%d", s5.Domain, s5.TcpPort)
+
+		if !s5.concurrencyCheck() {
+			log.Printf("%s concurrencyCheck false\n", s5.User)
+			s5.Conn.Write(errorReplySocks5(0x05)) // connection refused
+			return
+		}
+
 		s5.handleConnect()
 	} else if command == 0x03 { // 0x03: UDP ASSOCIATE
+		if !s5.concurrencyCheck() {
+			log.Printf("%s concurrencyCheck false\n", s5.User)
+			s5.Conn.Write(errorReplySocks5(0x05)) // connection refused
+			return
+		}
+
 		var err error
 		s5.UDPConn, err = net.ListenUDP("udp", nil)
 		if err != nil {
@@ -228,7 +243,7 @@ func (s5 *Socks5) handleUDP() {
 					log.Printf("[%s][InsertUpdateUdpLogST]CacheChan is full drop tcpid %d\n", s5.User, id)
 				}
 			}
-			atomic.AddInt64(&s5.Info.transfer, int64(len(buf)))
+			atomic.AddInt64(&s5.Info.Transfer, int64(len(buf)))
 		} else {
 			//send udp data to server
 			if buf[0] != 0x00 || buf[1] != 0x00 || buf[2] != 0x00 {
@@ -276,7 +291,7 @@ func (s5 *Socks5) handleUDP() {
 				}
 
 			}
-			atomic.AddInt64(&s5.Info.transfer, int64(n))
+			atomic.AddInt64(&s5.Info.Transfer, int64(n))
 		}
 	}
 }

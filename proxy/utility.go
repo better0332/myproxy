@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/better0332/myproxy/queue"
 )
@@ -104,8 +105,9 @@ type Proxy struct {
 	ConnBufRead *bufio.Reader
 	Bconn       net.Conn
 
-	User string
-	Info *accountInfo
+	User    string
+	Info    *accountInfo
+	CoCheck bool
 
 	Target  string
 	Domain  string
@@ -135,11 +137,18 @@ type httpInfo struct {
 }
 
 type accountInfo struct {
+	User        string
 	pwd         string
 	relayServer string
 	logEnable   bool
 
-	transfer int64
+	Transfer int64 //protect by sync/atomic
+
+	protect      sync.Mutex
+	timeAbnormal int64 //unix
+	timePoint    int64 //UnixNano
+	duration     int64
+	connMap      map[net.Conn]int
 }
 
 type accountMap struct {
@@ -147,18 +156,21 @@ type accountMap struct {
 	l sync.RWMutex
 }
 
-func GetAccountTrans() map[string]int64 {
-	trans := make(map[string]int64, 200)
+func HandleAccountInfo(t1, t2 int64) []*accountInfo {
+	infoArray := make([]*accountInfo, 0, 200)
 
 	account.l.RLock()
-	for user, info := range account.m {
-		if v := atomic.SwapInt64(&info.transfer, 0); v > 0 {
-			trans[user] = v
-		}
+	for _, info := range account.m {
+		infoArray = append(infoArray, info)
 	}
 	account.l.RUnlock()
 
-	return trans
+	for _, info := range infoArray {
+		info.protect.Lock()
+		info.protect.Unlock()
+	}
+
+	return infoArray
 }
 
 func GetAccountInfo(user string) *accountInfo {
@@ -170,17 +182,47 @@ func GetAccountInfo(user string) *accountInfo {
 }
 
 func SetAccount(user, pwd, relayServer string, logEnable bool) {
-	account.l.Lock()
-	defer account.l.Unlock()
+	info := &accountInfo{
+		User:        user,
+		pwd:         pwd,
+		relayServer: relayServer,
+		logEnable:   logEnable,
+		connMap:     make(map[net.Conn]int, 10),
+	}
 
-	account.m[user] = &accountInfo{pwd, relayServer, logEnable, 0}
+	account.l.Lock()
+	if v, ok := account.m[user]; ok {
+		delete(account.m, user)
+		account.l.Unlock()
+
+		v.protect.Lock()
+		for conn, _ := range v.connMap {
+			conn.Close()
+		}
+		v.protect.Unlock()
+
+		account.l.Lock()
+	}
+	account.m[user] = info
+	account.l.Unlock()
 }
 
 func DelAccount(user string) {
 	account.l.Lock()
-	defer account.l.Unlock()
+	if v, ok := account.m[user]; ok {
+		delete(account.m, user)
+		account.l.Unlock()
 
-	delete(account.m, user)
+		v.protect.Lock()
+		for conn, _ := range v.connMap {
+			conn.Close()
+		}
+		v.protect.Unlock()
+
+		return
+	}
+
+	account.l.Unlock()
 }
 
 func InitAccountMap(host string) {
@@ -305,6 +347,39 @@ func (proxy *Proxy) getTcpId() int64 {
 	return atomic.LoadInt64(proxy.TcpId)
 }
 
+func (proxy *Proxy) concurrencyCheck() bool {
+	info := proxy.Info
+
+	info.protect.Lock()
+	defer info.protect.Unlock()
+
+	if len(info.connMap) >= 100 {
+		return false
+	}
+	if info.timeAbnormal > 0 && len(info.connMap) >= 10 {
+		return false
+	}
+	info.connMap[proxy.Conn] = 1
+
+	if info.timePoint == 0 && len(info.connMap) > 10 {
+		info.timePoint = time.Now().UnixNano()
+	} else if info.timePoint > 0 && len(info.connMap) <= 10 {
+		info.duration += time.Now().UnixNano() - info.timePoint
+		info.timePoint = 0
+	}
+
+	proxy.CoCheck = true
+	return true
+}
+
+func (proxy *Proxy) freeConn() {
+	if proxy.CoCheck {
+		proxy.Info.protect.Lock()
+		delete(proxy.Info.connMap, proxy.Conn)
+		proxy.Info.protect.Unlock()
+	}
+}
+
 func (proxy *Proxy) proxying() {
 	proxy.iobridge(proxy.Bconn, proxy.Conn)
 }
@@ -315,42 +390,42 @@ func (proxy *Proxy) iobridge(dst, src io.ReadWriter) {
 	go func() {
 		defer func() { proxy.Quit <- true }()
 
-		var total int64
 		for {
 			n, err := io.CopyN(dst, src, 64<<10)
-			if n > 0 && proxy.Info.logEnable {
-				total += n
-				if id := proxy.getTcpId(); id > 0 && len(CacheChan) < cap(CacheChan) {
-					CacheChan <- &UpdateTcpST{id, n}
-				} else {
-					log.Printf("[%s][UpdateTcpST]CacheChan is full drop tcpid %d\n", proxy.User, id)
+			if n > 0 {
+				atomic.AddInt64(&proxy.Info.Transfer, n)
+				if proxy.Info.logEnable {
+					if id := proxy.getTcpId(); id > 0 && len(CacheChan) < cap(CacheChan) {
+						CacheChan <- &UpdateTcpST{id, n}
+					} else {
+						log.Printf("[%s][UpdateTcpST]CacheChan is full drop tcpid %d\n", proxy.User, id)
+					}
 				}
 			}
 			if err != nil {
 				break
 			}
 		}
-		atomic.AddInt64(&proxy.Info.transfer, total)
 	}()
 	go func() {
 		defer func() { proxy.Quit <- true }()
 
-		var total int64
 		for {
 			n, err := io.CopyN(src, dst, 64<<10)
-			if n > 0 && proxy.Info.logEnable {
-				total += n
-				if id := proxy.getTcpId(); id > 0 && len(CacheChan) < cap(CacheChan) {
-					CacheChan <- &UpdateTcpST{id, n}
-				} else {
-					log.Printf("[%s][UpdateTcpST]CacheChan is full drop tcpid %d\n", proxy.User, id)
+			if n > 0 {
+				atomic.AddInt64(&proxy.Info.Transfer, n)
+				if proxy.Info.logEnable {
+					if id := proxy.getTcpId(); id > 0 && len(CacheChan) < cap(CacheChan) {
+						CacheChan <- &UpdateTcpST{id, n}
+					} else {
+						log.Printf("[%s][UpdateTcpST]CacheChan is full drop tcpid %d\n", proxy.User, id)
+					}
 				}
 			}
 			if err != nil {
 				break
 			}
 		}
-		atomic.AddInt64(&proxy.Info.transfer, total)
 	}()
 
 	<-proxy.Quit // wait for either side to close

@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/better0332/myproxy/proxy"
@@ -161,21 +162,31 @@ func httpServer() {
 	log.Fatal(http.ListenAndServe(":6061", nil))
 }
 
-func postUserTrans() {
+func cycleHandle() {
+	var t1, t2 int64
+
 	for {
 		time.Sleep(1 * time.Minute)
 
-		trans := proxy.GetAccountTrans()
-		b, _ := json.Marshal(&trans)
+		t1 = t2
+		t2 = time.Now().UnixNano()
+		infoArray := proxy.HandleAccountInfo(t1, t2)
+
+		b, _ := json.Marshal(&infoArray)
 		resp, err := client.Post("https://speedmao.com/usertrans", "application/json", bytes.NewReader(b))
 		if err != nil {
 			log.Println(err)
 			continue
 		}
-		if resp.StatusCode != 200 {
-			log.Println("postUserTrans fail:", resp.Status)
-		}
+
 		resp.Body.Close()
+		if resp.StatusCode == 200 {
+			for _, info := range infoArray {
+				atomic.SwapInt64(&info.Transfer, 0)
+			}
+		} else {
+			log.Println("post user info fail:", resp.Status)
+		}
 	}
 }
 
@@ -216,7 +227,7 @@ func main() {
 	log.Printf("listening on %s...\n", *server)
 
 	go httpServer()
-	go postUserTrans()
+	go cycleHandle()
 
 	for {
 		conn, err := ln.Accept()

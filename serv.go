@@ -164,16 +164,17 @@ func httpServer() {
 
 func cycleHandle() {
 	var t1, t2 int64
+	t2 = time.Now().UnixNano()
 
 	for {
 		time.Sleep(1 * time.Minute)
 
 		t1 = t2
 		t2 = time.Now().UnixNano()
-		infoArray := proxy.HandleAccountInfo(t1, t2)
+		infoArray := proxy.HandleAccountInfo(t2 - t1)
 
 		b, _ := json.Marshal(&infoArray)
-		resp, err := client.Post("https://speedmao.com/usertrans", "application/json", bytes.NewReader(b))
+		resp, err := client.Post("https://speedmao.com/userinfo", "application/json", bytes.NewReader(b))
 		if err != nil {
 			log.Println(err)
 			continue

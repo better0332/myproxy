@@ -156,7 +156,7 @@ type accountMap struct {
 	l sync.RWMutex
 }
 
-func HandleAccountInfo(t1, t2 int64) []*accountInfo {
+func HandleAccountInfo(tCycle int64) []*accountInfo {
 	infoArray := make([]*accountInfo, 0, 200)
 
 	account.l.RLock()
@@ -167,6 +167,29 @@ func HandleAccountInfo(t1, t2 int64) []*accountInfo {
 
 	for _, info := range infoArray {
 		info.protect.Lock()
+
+		if info.timeAbnormal == 0 {
+			if float32(info.duration)/float32(tCycle) > 0.8 {
+				info.timeAbnormal = time.Now().Unix()
+				index := len(info.connMap) - 10
+				for conn, _ := range info.connMap {
+					if index == 0 {
+						break
+					}
+					conn.Close()
+					index--
+				}
+				log.Printf("[%s]concurrency overhead!\n", info.User)
+			}
+		} else {
+			if time.Now().Unix()-info.timeAbnormal > 2*3600 {
+				info.timeAbnormal = 0
+				log.Printf("[%s]abnormal concurrency recover!\n", info.User)
+			}
+		}
+		info.timePoint = 0
+		info.duration = 0
+
 		info.protect.Unlock()
 	}
 
@@ -221,7 +244,6 @@ func DelAccount(user string) {
 
 		return
 	}
-
 	account.l.Unlock()
 }
 
@@ -354,18 +376,17 @@ func (proxy *Proxy) concurrencyCheck() bool {
 	defer info.protect.Unlock()
 
 	if len(info.connMap) >= 100 {
+		log.Printf("[%s]concurrency more than 100\n", proxy.User)
 		return false
 	}
 	if info.timeAbnormal > 0 && len(info.connMap) >= 10 {
+		log.Printf("[%s]abnormal concurrency more than 10\n", proxy.User)
 		return false
 	}
 	info.connMap[proxy.Conn] = 1
 
-	if info.timePoint == 0 && len(info.connMap) > 10 {
+	if info.timeAbnormal == 0 && info.timePoint == 0 && len(info.connMap) > 10 {
 		info.timePoint = time.Now().UnixNano()
-	} else if info.timePoint > 0 && len(info.connMap) <= 10 {
-		info.duration += time.Now().UnixNano() - info.timePoint
-		info.timePoint = 0
 	}
 
 	proxy.CoCheck = true
@@ -374,9 +395,15 @@ func (proxy *Proxy) concurrencyCheck() bool {
 
 func (proxy *Proxy) freeConn() {
 	if proxy.CoCheck {
-		proxy.Info.protect.Lock()
-		delete(proxy.Info.connMap, proxy.Conn)
-		proxy.Info.protect.Unlock()
+		info := proxy.Info
+
+		info.protect.Lock()
+		delete(info.connMap, proxy.Conn)
+		if info.timeAbnormal == 0 && info.timePoint > 0 && len(info.connMap) <= 10 {
+			info.duration += time.Now().UnixNano() - info.timePoint
+			info.timePoint = 0
+		}
+		info.protect.Unlock()
 	}
 }
 

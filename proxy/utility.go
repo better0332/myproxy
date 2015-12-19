@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"bufio"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -101,9 +100,8 @@ func IsIpContains(ip net.IP) bool {
 }
 
 type Proxy struct {
-	Conn        net.Conn
-	ConnBufRead *bufio.Reader
-	Bconn       net.Conn
+	Conn  net.Conn
+	Bconn net.Conn
 
 	User    string
 	Info    *accountInfo
@@ -321,7 +319,7 @@ func (addr *SockAddr) ByteArray() []byte {
 	return bytes
 }
 
-func readBytes(rd *bufio.Reader, count int) (buf []byte) {
+func readBytes(rd io.Reader, count int) (buf []byte) {
 	buf = make([]byte, count)
 	if _, err := io.ReadFull(rd, buf); err != nil {
 		panic("readBytes err: " + err.Error())

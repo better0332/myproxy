@@ -60,7 +60,7 @@ func (s5 *Socks5) handleSocks5_() {
 	}()
 
 	// receive command
-	buf3 := readBytes(s5.ConnBufRead, 4)
+	buf3 := readBytes(s5.Conn, 4)
 	protocolCheck(buf3[0] == 0x05)
 	protocolCheck(buf3[2] == 0x00)
 
@@ -68,7 +68,7 @@ func (s5 *Socks5) handleSocks5_() {
 	if command == 0x01 { // 0x01: CONNECT
 		addrtype := buf3[3]
 		if addrtype == 0x01 { // 0x01: IP V4 address
-			buf4 := readBytes(s5.ConnBufRead, 6)
+			buf4 := readBytes(s5.Conn, 6)
 			ip := net.IPv4(buf4[0], buf4[1], buf4[2], buf4[3])
 			if !ip.IsGlobalUnicast() {
 				s5.Conn.Write(errorReplySocks5(0x05)) // connection refused
@@ -77,9 +77,9 @@ func (s5 *Socks5) handleSocks5_() {
 			s5.TcpPort = uint(buf4[4])<<8 + uint(buf4[5])
 			s5.Domain = ip.String()
 		} else if addrtype == 0x03 { // 0x03: DOMAINNAME
-			buf4 := readBytes(s5.ConnBufRead, 1)
+			buf4 := readBytes(s5.Conn, 1)
 			nmlen := int(buf4[0]) // domain name length
-			buf5 := readBytes(s5.ConnBufRead, nmlen+2)
+			buf5 := readBytes(s5.Conn, nmlen+2)
 			s5.TcpPort = uint(buf5[nmlen])<<8 + uint(buf5[nmlen+1])
 			s5.Domain = string(bytes.ToLower(buf5[:nmlen]))
 			if isBlockDomain(s5.Domain) {
@@ -160,11 +160,11 @@ func (s5 *Socks5) handleSocks5_() {
 }
 
 func (s5 *Socks5) HandleSocks5() (ok bool) {
-	buf1 := readBytes(s5.ConnBufRead, 2)
+	buf1 := readBytes(s5.Conn, 2)
 	protocolCheck(buf1[0] == 0x05)
 
 	nom := int(buf1[1]) // number of methods
-	methods := readBytes(s5.ConnBufRead, nom)
+	methods := readBytes(s5.Conn, nom)
 
 	var uname, passwd string
 	var support bool
@@ -181,12 +181,12 @@ OUT:
 			s5.Conn.Write([]byte{0x05, 0x02})
 			support = true
 			// auth uname and passwd
-			auth := readBytes(s5.ConnBufRead, 2)
+			auth := readBytes(s5.Conn, 2)
 			protocolCheck(auth[0] == 0x01)
 			ulen := int(auth[1])
-			uname = string(readBytes(s5.ConnBufRead, ulen))
-			plen := readBytes(s5.ConnBufRead, 1)
-			passwd = string(readBytes(s5.ConnBufRead, int(plen[0])))
+			uname = string(readBytes(s5.Conn, ulen))
+			plen := readBytes(s5.Conn, 1)
+			passwd = string(readBytes(s5.Conn, int(plen[0])))
 			// reply auth result
 			s5.Info = GetAccountInfo(uname)
 			if s5.Info != nil && s5.Info.pwd == passwd {

@@ -167,6 +167,10 @@ func HandleAccountInfo(tCycle int64) []*accountInfo {
 		info.protect.Lock()
 
 		if info.timeAbnormal == 0 {
+			if info.timePoint > 0 {
+				info.duration = time.Now().UnixNano() - info.timePoint
+			}
+
 			if float32(info.duration)/float32(tCycle) > 0.8 {
 				info.timeAbnormal = time.Now().Unix()
 				index := len(info.connMap) - 10
@@ -178,15 +182,18 @@ func HandleAccountInfo(tCycle int64) []*accountInfo {
 					index--
 				}
 				log.Printf("[%s]concurrency overhead!\n", info.User)
+			} else if info.timePoint > 0 {
+				info.timePoint = time.Now().UnixNano()
+				info.duration = 0
+			} else {
+				info.duration = 0
 			}
-		} else {
-			if time.Now().Unix()-info.timeAbnormal > 2*3600 {
-				info.timeAbnormal = 0
-				log.Printf("[%s]abnormal concurrency recover!\n", info.User)
-			}
+		} else if time.Now().Unix()-info.timeAbnormal > 2*3600 {
+			info.timeAbnormal = 0
+			info.timePoint = 0
+			info.duration = 0
+			log.Printf("[%s]abnormal concurrency recover!\n", info.User)
 		}
-		info.timePoint = 0
-		info.duration = 0
 
 		info.protect.Unlock()
 	}

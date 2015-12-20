@@ -217,7 +217,7 @@ func (s5 *Socks5) handleUDP() {
 
 	for {
 		buf := make([]byte, MAX_UDPBUF)
-		s5.UDPConn.SetDeadline(time.Now().Add(2 * time.Minute))
+		s5.UDPConn.SetDeadline(time.Now().Add(1 * time.Minute))
 		n, udpAddr, err := s5.UDPConn.ReadFromUDP(buf)
 		if err != nil {
 			if !isUseOfClosedConn(err) {
@@ -298,7 +298,7 @@ func (s5 *Socks5) handleUDP() {
 
 func (s5 *Socks5) handleConnect() {
 	//log.Printf("[%s]trying to connect to %s...\n", s5.User, s5.Target)
-	bconn, err := net.Dial("tcp", s5.Target)
+	bconn, err := net.DialTimeout("tcp", s5.Target, 10*time.Second)
 	if err != nil {
 		log.Printf("[%s]failed to connect to %s: %s\n", s5.User, s5.Target, err)
 		s5.Conn.Write(errorReplySocks5(0x05)) // connection refused
@@ -321,8 +321,8 @@ func (s5 *Socks5) handleConnect() {
 	s5.Conn.Write(buf)
 
 	// reset deadline
-	// s5.Conn.SetDeadline(time.Now().Add(2 * time.Hour))
-	s5.Bconn.SetDeadline(time.Now().Add(2 * time.Minute))
+	s5.Conn.SetDeadline(time.Now().Add(1 * time.Minute))
+	s5.Bconn.SetDeadline(time.Now().Add(1 * time.Minute))
 
 	if s5.Info.logEnable && len(CacheChan) < cap(CacheChan) {
 		CacheChan <- &InsertTcpLogST{s5.TcpId, s5.User, "TCP", s5.Conn.RemoteAddr().String(), s5.Target, time.Now().Format("2006-01-02 15:04:05")}

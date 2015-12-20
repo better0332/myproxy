@@ -48,7 +48,7 @@ func handleConnection(conn net.Conn) {
 		}
 	}()
 
-	conn.SetDeadline(time.Now().Add(30 * time.Second))
+	conn.SetDeadline(time.Now().Add(20 * time.Second))
 
 	var tcpId int64 = 0
 	socks5 := &proxy.Socks5{}

@@ -1,21 +1,14 @@
 package proxy
 
 import (
-	"crypto/tls"
-	"crypto/x509"
-	"errors"
 	"io"
 	"log"
 	"net"
-	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/better0332/myproxy/queue"
 )
 
 const (
@@ -23,30 +16,6 @@ const (
 )
 
 var (
-	tr = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true} /*DisableCompression: true*/}
-
-	client = &http.Client{Transport: tr, CheckRedirect: redirectPolicy}
-
-	RootCert     tls.Certificate
-	X509RootCert *x509.Certificate
-
-	cachedCertificates = struct {
-		sync.RWMutex
-		m map[string]*tls.Certificate
-	}{m: make(map[string]*tls.Certificate)}
-
-	urlQueueMap = struct {
-		sync.Mutex
-		q *queue.Queue
-		m map[string]bool
-	}{q: queue.NewQueue(5000, false), m: make(map[string]bool, 5000)}
-
-	forbiddenRedirect = "forbidden redirect!"
-
-	reDomain1 = regexp.MustCompile(`[^\.]+\.(?:com|net|org|gov|edu)\.[a-z]{2}$`)
-	reDomain2 = regexp.MustCompile(`[^\.]+\.(?:ac|bj|sh|tj|cq|he|sx|nm|ln|jl|hl|js|zj|ah|fj|jx|sd|ha|hb|hn|gd|gx|hi|sc|gz|yn|xz|sn|gs|qh|nx|xj|tw|hk|mo)\.cn$`)
-	reDomain3 = regexp.MustCompile(`[^\.]+\.[^\.]+$`)
-
 	blockdomain = []string{
 		"baidu.com",
 		"qq.com",
@@ -119,19 +88,6 @@ type Proxy struct {
 type SockAddr struct {
 	Host string
 	Port int
-}
-
-type readerAndCloser struct {
-	io.Reader
-	io.Closer
-}
-
-type httpInfo struct {
-	req            *http.Request
-	respStatus     int
-	respConLen     int64
-	body           []byte
-	acceptEncoding string
 }
 
 type accountInfo struct {
@@ -280,27 +236,6 @@ func isBlockPort(port uint) bool {
 		port == 4662 || port == 4661 || port == 4242 || port == 4371
 }
 
-func pushUrl(url string) bool {
-	if len(url) > 1024 {
-		return false
-	}
-	defer urlQueueMap.Unlock()
-
-	urlQueueMap.Lock()
-	if _, ok := urlQueueMap.m[url]; ok {
-		return false
-	}
-	if rUrl := urlQueueMap.q.Push(url); rUrl != nil {
-		delete(urlQueueMap.m, rUrl.(string))
-	}
-	urlQueueMap.m[url] = true
-	return true
-}
-
-func redirectPolicy(req *http.Request, via []*http.Request) error {
-	return errors.New(forbiddenRedirect)
-}
-
 // Convert a "host:port" string to SockAddr
 func MakeSockAddr(HostPort string) SockAddr {
 	host, portstr, err := net.SplitHostPort(HostPort)
@@ -343,27 +278,6 @@ func protocolCheck(assert bool) {
 	if !assert {
 		panic("protocol error")
 	}
-}
-
-func getDomain(host string) string {
-	host = strings.Split(host, ":")[0]
-
-	if net.ParseIP(host) != nil {
-		return host
-	}
-
-	var domain string
-	if domain = reDomain1.FindString(host); domain != "" {
-		return string(domain)
-	}
-	if domain = reDomain2.FindString(host); domain != "" {
-		return string(domain)
-	}
-	if domain = reDomain3.FindString(host); domain != "" {
-		return string(domain)
-	}
-
-	return ""
 }
 
 func (proxy *Proxy) setTcpId(id int64) {

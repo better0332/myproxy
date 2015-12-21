@@ -46,14 +46,14 @@ DROP TABLE IF EXISTS `order_list`;
 CREATE TABLE `order_list` (
   `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
   `account_id` int(10) unsigned NOT NULL,
-  `server` varchar(255) NOT NULL,
   `property` tinyint(4) NOT NULL,
+  `server` varchar(255) NOT NULL,
+  `price` decimal(12,2) NOT NULL,
   `transfer` bigint(20) unsigned NOT NULL,
-  `relay_server` varchar(255) NOT NULL,
   `transfer_limit` bigint(20) unsigned NOT NULL,
-  `relay_transfer_limit` bigint(20) unsigned NOT NULL,
   `over_limit_price` decimal(12,2) NOT NULL,
-  `relay_over_limit_price` decimal(12,2) NOT NULL,
+  `relay_server` varchar(255) NOT NULL,
+  `relay_price` decimal(12,2) NOT NULL,
   `starttime` datetime NOT NULL,
   `endtime` datetime NOT NULL,
   PRIMARY KEY (`id`)
@@ -75,8 +75,6 @@ DROP TABLE IF EXISTS `relay_server_list`;
 CREATE TABLE `relay_server_list` (
   `relay_server` varchar(255) NOT NULL,
   `relay_price` decimal(12,2) NOT NULL,
-  `transfer_limit` bigint(20) unsigned NOT NULL,
-  `over_limit_price` decimal(12,2) NOT NULL,
   `detail` varchar(255) NOT NULL,
   `disable` tinyint(4) NOT NULL,
   `addtime` datetime NOT NULL,

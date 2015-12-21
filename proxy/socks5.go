@@ -124,12 +124,12 @@ func (s5 *Socks5) handleSocks5_() {
 		var host string
 		ip := s5.Conn.RemoteAddr().(*net.TCPAddr).IP
 		if IsIpContains(ip) {
-			if s5.Info.relayServer == "" {
+			host = ip.String()
+			if s5.Info.relayServer != host {
 				log.Printf("%s can't relay sock5 proxy\n", s5.User)
 				s5.Conn.Write(errorReplySocks5(0x05)) // connection refused
 				return
 			}
-			host = ip.String()
 		} else {
 			host = s5.Conn.LocalAddr().(*net.TCPAddr).IP.String()
 		}

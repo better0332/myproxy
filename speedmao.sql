@@ -65,6 +65,7 @@ CREATE TABLE `server_list` (
   `price` decimal(12,2) NOT NULL,
   `transfer_limit` bigint(20) unsigned NOT NULL,
   `over_limit_price` decimal(12,2) NOT NULL,
+  `region` varchar(16) NOT NULL,
   `detail` varchar(255) NOT NULL,
   `disable` tinyint(4) NOT NULL,
   `addtime` datetime NOT NULL,
@@ -75,6 +76,7 @@ DROP TABLE IF EXISTS `relay_server_list`;
 CREATE TABLE `relay_server_list` (
   `relay_server` varchar(255) NOT NULL,
   `relay_price` decimal(12,2) NOT NULL,
+  `region` varchar(16) NOT NULL,
   `detail` varchar(255) NOT NULL,
   `disable` tinyint(4) NOT NULL,
   `addtime` datetime NOT NULL,

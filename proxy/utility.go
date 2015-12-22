@@ -121,40 +121,42 @@ func HandleAccountInfo(tCycle int64) []*accountInfo {
 	}
 	account.l.RUnlock()
 
-	for _, info := range infoArray {
-		info.protect.Lock()
+	//	for _, info := range infoArray {
+	//		info.protect.Lock()
 
-		if info.timeAbnormal == 0 {
-			if info.timePoint > 0 {
-				info.duration = time.Now().UnixNano() - info.timePoint
-			}
+	//		if info.timeAbnormal == 0 {
+	//			if info.timePoint > 0 {
+	//				info.duration = time.Now().UnixNano() - info.timePoint
+	//			}
 
-			if float32(info.duration)/float32(tCycle) > 0.8 {
-				info.timeAbnormal = time.Now().Unix()
-				index := len(info.connMap) - 10
-				for conn, _ := range info.connMap {
-					if index == 0 {
-						break
-					}
-					conn.Close()
-					index--
-				}
-				log.Printf("[%s]concurrency overhead!\n", info.User)
-			} else if info.timePoint > 0 {
-				info.timePoint = time.Now().UnixNano()
-				info.duration = 0
-			} else {
-				info.duration = 0
-			}
-		} else if time.Now().Unix()-info.timeAbnormal > 2*3600 {
-			info.timeAbnormal = 0
-			info.timePoint = 0
-			info.duration = 0
-			log.Printf("[%s]abnormal concurrency recover!\n", info.User)
-		}
+	//			f := float32(info.duration) / float32(tCycle)
+	//			log.Println(f)
+	//			if f > 0.8 {
+	//				info.timeAbnormal = time.Now().Unix()
+	//				index := len(info.connMap) - 10
+	//				for conn, _ := range info.connMap {
+	//					if index == 0 {
+	//						break
+	//					}
+	//					conn.Close()
+	//					index--
+	//				}
+	//				log.Printf("[%s]concurrency overhead!\n", info.User)
+	//			} else if info.timePoint > 0 {
+	//				info.timePoint = time.Now().UnixNano()
+	//				info.duration = 0
+	//			} else {
+	//				info.duration = 0
+	//			}
+	//		} else if time.Now().Unix()-info.timeAbnormal > 2*3600 {
+	//			info.timeAbnormal = 0
+	//			info.timePoint = 0
+	//			info.duration = 0
+	//			log.Printf("[%s]abnormal concurrency recover!\n", info.User)
+	//		}
 
-		info.protect.Unlock()
-	}
+	//		info.protect.Unlock()
+	//	}
 
 	return infoArray
 }
@@ -276,6 +278,11 @@ func isUseOfClosedConn(err error) bool {
 	return ok && operr.Err.Error() == "use of closed network connection"
 }
 
+func isTimeoutConn(err error) bool {
+	operr, ok := err.(*net.OpError)
+	return ok && operr.Timeout()
+}
+
 func protocolCheck(assert bool) {
 	if !assert {
 		panic("protocol error")
@@ -352,14 +359,19 @@ func (proxy *Proxy) iobridge(dst, src io.ReadWriter) {
 			if n > 0 {
 				atomic.AddInt64(&proxy.Info.Transfer, n)
 				if proxy.Info.logEnable {
-					if id := proxy.getTcpId(); id > 0 && len(CacheChan) < cap(CacheChan) {
-						CacheChan <- &UpdateTcpST{id, n}
-					} else {
-						log.Printf("[%s][UpdateTcpST]CacheChan is full drop tcpid %d\n", proxy.User, id)
+					if id := proxy.getTcpId(); id > 0 {
+						if len(CacheChan) < cap(CacheChan) {
+							CacheChan <- &UpdateTcpST{id, n}
+						} else {
+							log.Printf("[%s][UpdateTcpST]CacheChan is full drop tcpid %d\n", proxy.User, id)
+						}
 					}
 				}
 			}
 			if err != nil {
+				//				if isTimeoutConn(err) {
+				//					log.Println(err)
+				//				}
 				break
 			}
 		}
@@ -372,14 +384,19 @@ func (proxy *Proxy) iobridge(dst, src io.ReadWriter) {
 			if n > 0 {
 				atomic.AddInt64(&proxy.Info.Transfer, n)
 				if proxy.Info.logEnable {
-					if id := proxy.getTcpId(); id > 0 && len(CacheChan) < cap(CacheChan) {
-						CacheChan <- &UpdateTcpST{id, n}
-					} else {
-						log.Printf("[%s][UpdateTcpST]CacheChan is full drop tcpid %d\n", proxy.User, id)
+					if id := proxy.getTcpId(); id > 0 {
+						if len(CacheChan) < cap(CacheChan) {
+							CacheChan <- &UpdateTcpST{id, n}
+						} else {
+							log.Printf("[%s][UpdateTcpST]CacheChan is full drop tcpid %d\n", proxy.User, id)
+						}
 					}
 				}
 			}
 			if err != nil {
+				//				if isTimeoutConn(err) {
+				//					log.Println(err)
+				//				}
 				break
 			}
 		}

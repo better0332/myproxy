@@ -51,10 +51,12 @@ func (s5 *Socks5) handleSocks5_() {
 		s5.freeConn()
 
 		if s5.Info.logEnable {
-			if id := s5.getTcpId(); id > 0 && len(CacheChan) < cap(CacheChan) {
-				CacheChan <- &StopTcpST{id, time.Now().Format("2006-01-02 15:04:05")}
-			} else {
-				log.Printf("[%s][StopTcp]CacheChan is full drop tcpid %d\n", s5.User, id)
+			if id := s5.getTcpId(); id > 0 {
+				if len(CacheChan) < cap(CacheChan) {
+					CacheChan <- &StopTcpST{id, time.Now().Format("2006-01-02 15:04:05")}
+				} else {
+					log.Printf("[%s][StopTcp]CacheChan is full drop tcpid %d\n", s5.User, id)
+				}
 			}
 		}
 	}()
@@ -114,20 +116,20 @@ func (s5 *Socks5) handleSocks5_() {
 		}
 		s5.Target = fmt.Sprintf("%s:%d", s5.Domain, s5.TcpPort)
 
-		if !s5.concurrencyCheck() {
-			log.Printf("%s concurrencyCheck false\n", s5.User)
-			s5.Conn.Write(errorReplySocks5(0x05)) // connection refused
-			return
-		}
-		log.Println(s5.Info)
+		//		if !s5.concurrencyCheck() {
+		//			log.Printf("%s concurrencyCheck false\n", s5.User)
+		//			s5.Conn.Write(errorReplySocks5(0x05)) // connection refused
+		//			return
+		//		}
+		//		log.Println(s5.Info, len(s5.Info.connMap))
 
 		s5.handleConnect()
 	} else if command == 0x03 { // 0x03: UDP ASSOCIATE
-		if !s5.concurrencyCheck() {
-			log.Printf("%s concurrencyCheck false\n", s5.User)
-			s5.Conn.Write(errorReplySocks5(0x05)) // connection refused
-			return
-		}
+		//		if !s5.concurrencyCheck() {
+		//			log.Printf("%s concurrencyCheck false\n", s5.User)
+		//			s5.Conn.Write(errorReplySocks5(0x05)) // connection refused
+		//			return
+		//		}
 
 		var err error
 		s5.UDPConn, err = net.ListenUDP("udp", nil)
@@ -248,10 +250,12 @@ func (s5 *Socks5) handleUDP() {
 			s5.UDPConn.WriteToUDP(data, rus.udpAddr)
 
 			if s5.Info.logEnable {
-				if id := s5.getTcpId(); id > 0 && len(CacheChan) < cap(CacheChan) {
-					CacheChan <- &InsertUpdateUdpLogST{id, udpAddr.String(), len(buf), time.Now().Format("2006-01-02 15:04:05")}
-				} else {
-					log.Printf("[%s][InsertUpdateUdpLogST]CacheChan is full drop tcpid %d\n", s5.User, id)
+				if id := s5.getTcpId(); id > 0 {
+					if len(CacheChan) < cap(CacheChan) {
+						CacheChan <- &InsertUpdateUdpLogST{id, udpAddr.String(), len(buf), time.Now().Format("2006-01-02 15:04:05")}
+					} else {
+						log.Printf("[%s][InsertUpdateUdpLogST]CacheChan is full drop tcpid %d\n", s5.User, id)
+					}
 				}
 			}
 			atomic.AddInt64(&s5.Info.Transfer, int64(len(buf)))
@@ -295,12 +299,13 @@ func (s5 *Socks5) handleUDP() {
 			n, _ := s5.UDPConn.WriteToUDP(udpData, remoteAddr)
 
 			if s5.Info.logEnable {
-				if id := s5.getTcpId(); id > 0 && len(CacheChan) < cap(CacheChan) {
-					CacheChan <- &InsertUpdateUdpLogST{id, remoteAddr.String(), n, time.Now().Format("2006-01-02 15:04:05")}
-				} else {
-					log.Printf("[%s][InsertUpdateUdpLogST]CacheChan is full drop tcpid %d\n", s5.User, id)
+				if id := s5.getTcpId(); id > 0 {
+					if len(CacheChan) < cap(CacheChan) {
+						CacheChan <- &InsertUpdateUdpLogST{id, remoteAddr.String(), n, time.Now().Format("2006-01-02 15:04:05")}
+					} else {
+						log.Printf("[%s][InsertUpdateUdpLogST]CacheChan is full drop tcpid %d\n", s5.User, id)
+					}
 				}
-
 			}
 			atomic.AddInt64(&s5.Info.Transfer, int64(n))
 		}

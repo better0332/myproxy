@@ -92,7 +92,7 @@ func UpdateTcp(id, transfer int64) {
 }
 
 func StopTcp(id int64, endtime string) {
-	stmtStopTcp.Exec(id, endtime)
+	stmtStopTcp.Exec(endtime, id)
 }
 
 func InsertUpdateUdpLog(tid int64, remoteAddr string, transfer int, addtime string) {

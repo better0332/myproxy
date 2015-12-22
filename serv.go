@@ -86,9 +86,13 @@ func accountSetHandler(w http.ResponseWriter, req *http.Request) {
 	}
 
 	var ips []net.IP
-	var err error
 	if relayServer != "" {
-		if ips, err = net.LookupIP(relayServer); err != nil {
+		host, _, err := net.SplitHostPort(relayServer)
+		if err != nil {
+			w.Write([]byte("relayServer format error!"))
+			return
+		}
+		if ips, err = net.LookupIP(host); err != nil {
 			w.Write([]byte("relayServer fail LookupIP!"))
 			return
 		}

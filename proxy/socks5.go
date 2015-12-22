@@ -119,6 +119,7 @@ func (s5 *Socks5) handleSocks5_() {
 			s5.Conn.Write(errorReplySocks5(0x05)) // connection refused
 			return
 		}
+		log.Println(s5.Info)
 
 		s5.handleConnect()
 	} else if command == 0x03 { // 0x03: UDP ASSOCIATE
@@ -331,8 +332,13 @@ func (s5 *Socks5) handleConnect() {
 	s5.Conn.Write(buf)
 
 	// reset deadline
-	s5.Conn.SetDeadline(time.Now().Add(1 * time.Minute))
-	s5.Bconn.SetDeadline(time.Now().Add(1 * time.Minute))
+	if s5.TcpPort == 80 || s5.TcpPort == 443 {
+		s5.Conn.SetDeadline(time.Now().Add(10 * time.Second))
+		s5.Bconn.SetDeadline(time.Now().Add(10 * time.Second))
+	} else {
+		s5.Conn.SetDeadline(time.Now().Add(1 * time.Minute))
+		s5.Bconn.SetDeadline(time.Now().Add(1 * time.Minute))
+	}
 
 	if s5.Info.logEnable && len(CacheChan) < cap(CacheChan) {
 		CacheChan <- &InsertTcpLogST{s5.TcpId, s5.User, "TCP", s5.Conn.RemoteAddr().String(), s5.Target, time.Now().Format("2006-01-02 15:04:05")}

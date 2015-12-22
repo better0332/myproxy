@@ -9,7 +9,7 @@ CREATE TABLE `account` (
   `password` varchar(64) NOT NULL,
   `order_id` int(10) unsigned NOT NULL,
   `money` decimal(12,2) NOT NULL,
-  `change_transfer` bigint(20) unsigned NOT NULL DEFAULT 10485760,
+  `change_transfer` bigint(20) unsigned NOT NULL,
   `abnormal` varchar(255) NOT NULL,
   `log_enable` tinyint(4) NOT NULL,
   `disable` tinyint(4) NOT NULL,
@@ -77,7 +77,7 @@ CREATE TABLE `server_list` (
 DROP TABLE IF EXISTS `relay_server_list`;
 CREATE TABLE `relay_server_list` (
   `server_id` int(10) unsigned NOT NULL,
-  `relay_server` varchar(255) NOT NULL,
+  `relay_server` varchar(255) NOT NULL, #xx.speedmao.com:500
   `relay_price` decimal(12,2) NOT NULL,
   `region` varchar(16) NOT NULL,
   `detail` varchar(255) NOT NULL,

@@ -17,7 +17,7 @@ CREATE TABLE `account` (
   `login_time` datetime NOT NULL,
   `addtime` datetime NOT NULL,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `username` (`username`)
+  UNIQUE KEY (`username`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 DROP TABLE IF EXISTS `bill_list`;
@@ -61,6 +61,7 @@ CREATE TABLE `order_list` (
 
 DROP TABLE IF EXISTS `server_list`;
 CREATE TABLE `server_list` (
+  `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
   `server` varchar(255) NOT NULL,
   `price` decimal(12,2) NOT NULL,
   `transfer_limit` bigint(20) unsigned NOT NULL,
@@ -69,16 +70,18 @@ CREATE TABLE `server_list` (
   `detail` varchar(255) NOT NULL,
   `disable` tinyint(4) NOT NULL,
   `addtime` datetime NOT NULL,
-  PRIMARY KEY (`server`)
+  PRIMARY KEY (`id`),
+  UNIQUE KEY (`server`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 DROP TABLE IF EXISTS `relay_server_list`;
 CREATE TABLE `relay_server_list` (
+  `server_id` int(10) unsigned NOT NULL,
   `relay_server` varchar(255) NOT NULL,
   `relay_price` decimal(12,2) NOT NULL,
   `region` varchar(16) NOT NULL,
   `detail` varchar(255) NOT NULL,
   `disable` tinyint(4) NOT NULL,
   `addtime` datetime NOT NULL,
-  PRIMARY KEY (`relay_server`)
+  PRIMARY KEY (`server_id`, `relay_server`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;

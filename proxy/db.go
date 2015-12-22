@@ -105,22 +105,23 @@ func SetAccountMap(m map[string]*accountInfo, h string) {
 		panic(err)
 	}
 
-	var rows *sql.Rows
-	if h == "" {
-		rows, err = db.Query(`select username, password, log_enable, relay_server from account, order_list where order_id=order_list.id and disable=0 and money>0`)
-	} else {
-		rows, err = db.Query(`select username, password, log_enable, relay_server from account, order_list where order_id=order_list.id and server=? and disable=0 and money>0`, h)
-	}
+	rows, err := db.Query(`select username, password, log_enable, relay_server from account, order_list where order_id=order_list.id and server=? and disable=0 and money>0`, h)
 	if err != nil {
 		panic(err)
 	}
 	defer rows.Close()
 
 	for rows.Next() {
+		var relayServer string
 		var logEnable int
 		info := accountInfo{connMap: make(map[net.Conn]int, 10)}
-		if err = rows.Scan(&info.User, &info.pwd, &info.relayServer, &logEnable); err != nil {
+		if err = rows.Scan(&info.User, &info.pwd, &relayServer, &logEnable); err != nil {
 			panic(err)
+		}
+		if relayServer != "" {
+			if info.relayServer, err = net.LookupIP(relayServer); err != nil {
+				panic(err)
+			}
 		}
 		if logEnable > 0 {
 			info.logEnable = true

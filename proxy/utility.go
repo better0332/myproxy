@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bytes"
 	"io"
 	"log"
 	"net"
@@ -72,9 +73,10 @@ type Proxy struct {
 	Conn  net.Conn
 	Bconn net.Conn
 
-	User    string
-	Info    *accountInfo
-	CoCheck bool
+	User       string
+	Info       *accountInfo
+	CoCheck    bool
+	RelayCheck bool
 
 	Target  string
 	Domain  string
@@ -93,7 +95,7 @@ type SockAddr struct {
 type accountInfo struct {
 	User        string
 	pwd         string
-	relayServer string
+	relayServer []net.IP
 	logEnable   bool
 
 	Transfer int64 //protect by sync/atomic
@@ -165,7 +167,7 @@ func GetAccountInfo(user string) *accountInfo {
 	return info
 }
 
-func SetAccount(user, pwd, relayServer string, logEnable bool) {
+func SetAccount(user, pwd string, relayServer []net.IP, logEnable bool) {
 	info := &accountInfo{
 		User:        user,
 		pwd:         pwd,
@@ -324,6 +326,15 @@ func (proxy *Proxy) freeConn() {
 		}
 		info.protect.Unlock()
 	}
+}
+
+func (proxy *Proxy) relayCheck(remoteIP net.IP) bool {
+	for _, ip := range proxy.Info.relayServer {
+		if bytes.Equal(remoteIP, ip) {
+			return true
+		}
+	}
+	return false
 }
 
 func (proxy *Proxy) proxying() {

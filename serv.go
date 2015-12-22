@@ -25,7 +25,6 @@ var (
 	server       = flag.String("server", ":443", "server listen address")
 	hostname     = flag.String("host", "", "server hostname, default HOSTNAME(1)")
 	udpRelayCIDR = flag.String("relay", "", "udp relay CIDR(multi split by comma)")
-	all          = flag.Bool("all", false, "get all accounts")
 
 	tr     = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true} /*DisableCompression: true*/}
 	client = &http.Client{Transport: tr}
@@ -86,7 +85,15 @@ func accountSetHandler(w http.ResponseWriter, req *http.Request) {
 		bLog = true
 	}
 
-	proxy.SetAccount(user, pwd, relayServer, bLog)
+	var ips []net.IP
+	var err error
+	if relayServer != "" {
+		if ips, err = net.LookupIP(relayServer); err != nil {
+			w.Write([]byte("relayServer fail LookupIP!"))
+			return
+		}
+	}
+	proxy.SetAccount(user, pwd, ips, bLog)
 
 	w.Write([]byte("ok"))
 }
@@ -161,15 +168,13 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
 	var err error
-	if !*all {
-		if *hostname == "" {
-			if *hostname, err = os.Hostname(); err != nil {
-				log.Fatal("get os hostname error:", err)
-			}
+
+	if *hostname == "" {
+		if *hostname, err = os.Hostname(); err != nil {
+			log.Fatal("get os hostname error:", err)
 		}
-	} else {
-		*hostname = ""
 	}
+
 	for _, cidr := range strings.Split(*udpRelayCIDR, ",") {
 		if cidr = strings.TrimSpace(cidr); cidr != "" {
 			if _, ipnet, err := net.ParseCIDR(cidr); err == nil {

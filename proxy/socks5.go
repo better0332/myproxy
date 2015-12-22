@@ -59,6 +59,22 @@ func (s5 *Socks5) handleSocks5_() {
 		}
 	}()
 
+	// RelayCheck
+	remoteIP := s5.Conn.RemoteAddr().(*net.TCPAddr).IP
+	if len(s5.Info.relayServer) == 0 {
+		if IsIpContains(remoteIP) {
+			log.Printf("%s can't relay sock5 proxy\n", s5.User)
+			s5.Conn.Write(errorReplySocks5(0x05)) // connection refused
+			return
+		}
+	} else if s5.relayCheck(remoteIP) {
+		s5.RelayCheck = true
+	} else {
+		log.Printf("%s illegal relay sock5 proxy\n", s5.User)
+		s5.Conn.Write(errorReplySocks5(0x05)) // connection refused
+		return
+	}
+
 	// receive command
 	buf3 := readBytes(s5.Conn, 4)
 	protocolCheck(buf3[0] == 0x05)
@@ -122,14 +138,8 @@ func (s5 *Socks5) handleSocks5_() {
 		defer s5.UDPConn.Close()
 
 		var host string
-		ip := s5.Conn.RemoteAddr().(*net.TCPAddr).IP
-		if IsIpContains(ip) {
-			host = ip.String()
-			if s5.Info.relayServer != host {
-				log.Printf("%s can't relay sock5 proxy\n", s5.User)
-				s5.Conn.Write(errorReplySocks5(0x05)) // connection refused
-				return
-			}
+		if s5.RelayCheck {
+			host = remoteIP.String()
 		} else {
 			host = s5.Conn.LocalAddr().(*net.TCPAddr).IP.String()
 		}

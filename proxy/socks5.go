@@ -116,20 +116,20 @@ func (s5 *Socks5) handleSocks5_() {
 		}
 		s5.Target = fmt.Sprintf("%s:%d", s5.Domain, s5.TcpPort)
 
-		//		if !s5.concurrencyCheck() {
-		//			log.Printf("%s concurrencyCheck false\n", s5.User)
-		//			s5.Conn.Write(errorReplySocks5(0x05)) // connection refused
-		//			return
-		//		}
-		//		log.Println(s5.Info, len(s5.Info.connMap))
+		if !s5.concurrencyCheck() {
+			log.Printf("%s concurrencyCheck false\n", s5.User)
+			s5.Conn.Write(errorReplySocks5(0x05)) // connection refused
+			return
+		}
+		//log.Println(s5.Info, len(s5.Info.connMap))
 
 		s5.handleConnect()
 	} else if command == 0x03 { // 0x03: UDP ASSOCIATE
-		//		if !s5.concurrencyCheck() {
-		//			log.Printf("%s concurrencyCheck false\n", s5.User)
-		//			s5.Conn.Write(errorReplySocks5(0x05)) // connection refused
-		//			return
-		//		}
+		if !s5.concurrencyCheck() {
+			log.Printf("%s concurrencyCheck false\n", s5.User)
+			s5.Conn.Write(errorReplySocks5(0x05)) // connection refused
+			return
+		}
 
 		var err error
 		s5.UDPConn, err = net.ListenUDP("udp", nil)

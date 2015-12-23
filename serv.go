@@ -25,6 +25,10 @@ var (
 	server       = flag.String("server", ":443", "server listen address")
 	hostname     = flag.String("host", "", "server hostname, default HOSTNAME(1)")
 	udpRelayCIDR = flag.String("relay", "", "udp relay CIDR(multi split by comma)")
+	blockDomain  = flag.String("blockdomain", "blockdomain.txt", "block domain file")
+	threshold    = flag.Uint("threshold", 10, "concurrentcy connection threshold")
+	ratio        = flag.Float64("ratio", 0.8, "concurrentcy connection ratio")
+	blockTime    = flag.Uint("blocktime", 120, "concurrentcy connection block minutes")
 
 	tr     = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true} /*DisableCompression: true*/}
 	client = &http.Client{Transport: tr}
@@ -189,6 +193,10 @@ func main() {
 		}
 	}
 
+	if err = proxy.SetBlockDomain(*blockDomain); err != nil {
+		log.Fatal(err)
+	}
+	proxy.SetConcurrentcy(*threshold, *blockTime, *ratio)
 	proxy.InitAccountMap(*hostname)
 	log.Println("initAccountMap ok")
 

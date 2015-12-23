@@ -1,10 +1,12 @@
 package proxy
 
 import (
+	"bufio"
 	"bytes"
 	"io"
 	"log"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,44 +19,35 @@ const (
 )
 
 var (
-	blockdomain = []string{
-		"baidu.com",
-		"qq.com",
-		"163.com",
-		"youku.com",
-		"iqiyi.com",
-		"sohu.com",
-		"weibo.com",
-		"bilibili.com",
-		"acfun.tv",
-		"hunantv.com",
-		"letv.com",
-		"cntv.cn",
-		"taobao.com",
-		"jd.com",
-		"tmall.com",
-		"sina.com.cn",
-		"onlinedown.net",
-		"skycn.com",
-		"xunlei.com",
-		"verycd.com",
-		"kugou.com",
-		"tudou.com",
-		"pptv.com",
-		"kankan.com",
-		"360.com",
-		"360.cn",
-		"360safe.com",
-		"58.com",
-		"ganji.com",
-		"proxycap.com",
-		"localhost",
-	}
+	blockdomain []string
+
+	threshold uint
+	blockTime uint
+	ratio     float64
 
 	account = accountMap{m: make(map[string]*accountInfo, 200)}
 
 	udpRelayIpNets []*net.IPNet
 )
+
+func SetBlockDomain(f string) error {
+	file, err := os.Open(f)
+	if err != nil {
+		return err
+	}
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		blockdomain = append(blockdomain, scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		log.Printf("%s is not full load: %v", f, err)
+	}
+	return nil
+}
+
+func SetConcurrentcy(t, b uint, r float64) {
+	threshold, blockTime, ratio = t, b, r
+}
 
 func AppendIpNets(ipnet *net.IPNet) {
 	udpRelayIpNets = append(udpRelayIpNets, ipnet)
@@ -121,42 +114,42 @@ func HandleAccountInfo(tCycle int64) []*accountInfo {
 	}
 	account.l.RUnlock()
 
-	//	for _, info := range infoArray {
-	//		info.protect.Lock()
+	for _, info := range infoArray {
+		info.protect.Lock()
 
-	//		if info.timeAbnormal == 0 {
-	//			if info.timePoint > 0 {
-	//				info.duration = time.Now().UnixNano() - info.timePoint
-	//			}
+		if info.timeAbnormal == 0 {
+			if info.timePoint > 0 {
+				info.duration = time.Now().UnixNano() - info.timePoint
+			}
 
-	//			f := float32(info.duration) / float32(tCycle)
-	//			log.Println(f)
-	//			if f > 0.8 {
-	//				info.timeAbnormal = time.Now().Unix()
-	//				index := len(info.connMap) - 10
-	//				for conn, _ := range info.connMap {
-	//					if index == 0 {
-	//						break
-	//					}
-	//					conn.Close()
-	//					index--
-	//				}
-	//				log.Printf("[%s]concurrency overhead!\n", info.User)
-	//			} else if info.timePoint > 0 {
-	//				info.timePoint = time.Now().UnixNano()
-	//				info.duration = 0
-	//			} else {
-	//				info.duration = 0
-	//			}
-	//		} else if time.Now().Unix()-info.timeAbnormal > 2*3600 {
-	//			info.timeAbnormal = 0
-	//			info.timePoint = 0
-	//			info.duration = 0
-	//			log.Printf("[%s]abnormal concurrency recover!\n", info.User)
-	//		}
+			f := float64(info.duration) / float64(tCycle)
+			//log.Println(f)
+			if f > ratio {
+				info.timeAbnormal = time.Now().Unix()
+				log.Printf("[%s]concurrency overhead!\n", info.User)
+				index := uint(len(info.connMap)) - threshold
+				for conn, _ := range info.connMap {
+					if index <= 0 {
+						break
+					}
+					conn.Close()
+					index--
+				}
+			} else if info.timePoint > 0 {
+				info.timePoint = time.Now().UnixNano()
+				info.duration = 0
+			} else {
+				info.duration = 0
+			}
+		} else if uint(time.Now().Unix()-info.timeAbnormal) > blockTime*60 {
+			info.timeAbnormal = 0
+			info.timePoint = 0
+			info.duration = 0
+			log.Printf("[%s]abnormal concurrency recover!\n", info.User)
+		}
 
-	//		info.protect.Unlock()
-	//	}
+		info.protect.Unlock()
+	}
 
 	return infoArray
 }
@@ -307,13 +300,13 @@ func (proxy *Proxy) concurrencyCheck() bool {
 		log.Printf("[%s]concurrency more than 100\n", proxy.User)
 		return false
 	}
-	if info.timeAbnormal > 0 && len(info.connMap) >= 10 {
-		log.Printf("[%s]abnormal concurrency more than 10\n", proxy.User)
+	if info.timeAbnormal > 0 && uint(len(info.connMap)) >= threshold {
+		log.Printf("[%s]abnormal concurrency more than %d\n", proxy.User, threshold)
 		return false
 	}
 	info.connMap[proxy.Conn] = 1
 
-	if info.timeAbnormal == 0 && info.timePoint == 0 && len(info.connMap) > 10 {
+	if info.timeAbnormal == 0 && info.timePoint == 0 && uint(len(info.connMap)) > threshold {
 		info.timePoint = time.Now().UnixNano()
 	}
 
@@ -327,7 +320,7 @@ func (proxy *Proxy) freeConn() {
 
 		info.protect.Lock()
 		delete(info.connMap, proxy.Conn)
-		if info.timeAbnormal == 0 && info.timePoint > 0 && len(info.connMap) <= 10 {
+		if info.timeAbnormal == 0 && info.timePoint > 0 && uint(len(info.connMap)) <= threshold {
 			info.duration += time.Now().UnixNano() - info.timePoint
 			info.timePoint = 0
 		}

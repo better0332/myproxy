@@ -75,7 +75,7 @@ type Proxy struct {
 	Domain  string
 	TcpPort uint
 
-	TcpId int64 //race detect
+	TcpId *int64 //race detect
 
 	Quit chan bool
 }
@@ -123,7 +123,7 @@ func HandleAccountInfo(tCycle int64) []*accountInfo {
 			}
 
 			f := float64(info.duration) / float64(tCycle)
-			//log.Println(f)
+			log.Println(f)
 			if f > ratio {
 				info.timeAbnormal = time.Now().Unix()
 				log.Printf("[%s]concurrency overhead!\n", info.User)
@@ -329,6 +329,16 @@ func (proxy *Proxy) relayCheck(remoteIP net.IP) bool {
 	return false
 }
 
+func (proxy *Proxy) resetDeadline() {
+	if proxy.TcpPort == 80 && proxy.TcpPort == 443 {
+		proxy.Conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+		proxy.Bconn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	} else {
+		proxy.Conn.SetReadDeadline(time.Now().Add(1 * time.Minute))
+		proxy.Bconn.SetReadDeadline(time.Now().Add(1 * time.Minute))
+	}
+}
+
 func (proxy *Proxy) proxying() {
 	proxy.Quit = make(chan bool, 2)
 
@@ -336,31 +346,22 @@ func (proxy *Proxy) proxying() {
 		defer func() { proxy.Quit <- true }()
 
 		for {
-			// reset deadline
-			if proxy.TcpPort == 80 && proxy.TcpPort == 443 {
-				proxy.Conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-				proxy.Bconn.SetReadDeadline(time.Now().Add(10 * time.Second))
-			} else {
-				proxy.Conn.SetReadDeadline(time.Now().Add(1 * time.Minute))
-				proxy.Bconn.SetReadDeadline(time.Now().Add(1 * time.Minute))
-			}
-
+			proxy.resetDeadline()
 			n, err := io.CopyN(proxy.Bconn, proxy.Conn, 64<<10)
 			if n > 0 {
 				atomic.AddInt64(&proxy.Info.Transfer, n)
-				if proxy.Info.logEnable && proxy.TcpId > 0 {
+				if proxy.Info.logEnable && *proxy.TcpId > 0 {
 					if len(CacheChan) < cap(CacheChan) {
-						CacheChan <- &UpdateTcpST{proxy.TcpId, n}
+						CacheChan <- &UpdateTcpST{*proxy.TcpId, n}
 					} else {
 						log.Printf("[%s][UpdateTcpST]CacheChan is full drop tcpid %d\n", proxy.User, proxy.TcpId)
 					}
 				}
 			}
 			if err != nil {
-				//				if isTimeoutConn(err) {
-				//					log.Println(err)
-				//				}
-				break
+				if isTimeoutConn(err) && n == 0 || !isTimeoutConn(err) {
+					break
+				}
 			}
 		}
 	}()
@@ -368,31 +369,22 @@ func (proxy *Proxy) proxying() {
 		defer func() { proxy.Quit <- true }()
 
 		for {
-			// reset deadline
-			if proxy.TcpPort == 80 && proxy.TcpPort == 443 {
-				proxy.Bconn.SetReadDeadline(time.Now().Add(10 * time.Second))
-				proxy.Conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-			} else {
-				proxy.Bconn.SetReadDeadline(time.Now().Add(1 * time.Minute))
-				proxy.Conn.SetReadDeadline(time.Now().Add(1 * time.Minute))
-			}
-
+			proxy.resetDeadline()
 			n, err := io.CopyN(proxy.Conn, proxy.Bconn, 64<<10)
 			if n > 0 {
 				atomic.AddInt64(&proxy.Info.Transfer, n)
-				if proxy.Info.logEnable && proxy.TcpId > 0 {
+				if proxy.Info.logEnable && *proxy.TcpId > 0 {
 					if len(CacheChan) < cap(CacheChan) {
-						CacheChan <- &UpdateTcpST{proxy.TcpId, n}
+						CacheChan <- &UpdateTcpST{*proxy.TcpId, n}
 					} else {
 						log.Printf("[%s][UpdateTcpST]CacheChan is full drop tcpid %d\n", proxy.User, proxy.TcpId)
 					}
 				}
 			}
 			if err != nil {
-				//				if isTimeoutConn(err) {
-				//					log.Println(err)
-				//				}
-				break
+				if isTimeoutConn(err) && n == 0 || !isTimeoutConn(err) {
+					break
+				}
 			}
 		}
 	}()

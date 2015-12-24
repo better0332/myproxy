@@ -12,7 +12,7 @@ var stmtInsertTcpLog, stmtUpdateTcp, stmtStopTcp, stmtInsertUpdateUdpLog *sql.St
 var CacheChan = make(chan interface{}, 2000)
 
 type InsertTcpLogST struct {
-	tcpId                                                  int64
+	tcpId                                                  *int64
 	username, proxyType, clientAddr, remoteAddr, starttime string
 }
 
@@ -66,7 +66,7 @@ func handleSQL() {
 		inter := <-CacheChan
 		switch inst := inter.(type) {
 		case *InsertTcpLogST:
-			inst.tcpId = InsertTcpLog(inst.username, inst.proxyType, inst.clientAddr, inst.remoteAddr, inst.starttime)
+			*inst.tcpId = InsertTcpLog(inst.username, inst.proxyType, inst.clientAddr, inst.remoteAddr, inst.starttime)
 		case *UpdateTcpST:
 			UpdateTcp(inst.id, inst.transfer)
 		case *InsertUpdateUdpLogST:

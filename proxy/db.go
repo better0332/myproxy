@@ -3,7 +3,6 @@ package proxy
 import (
 	"database/sql"
 	"net"
-	"sync/atomic"
 
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -13,7 +12,7 @@ var stmtInsertTcpLog, stmtUpdateTcp, stmtStopTcp, stmtInsertUpdateUdpLog *sql.St
 var CacheChan = make(chan interface{}, 2000)
 
 type InsertTcpLogST struct {
-	tcpId                                                  *int64
+	tcpId                                                  int64
 	username, proxyType, clientAddr, remoteAddr, starttime string
 }
 
@@ -41,9 +40,9 @@ func init() {
 		panic(err)
 	}
 	db.SetMaxIdleConns(10)
-	if err = db.Ping(); err != nil {
-		panic(err)
-	}
+	//	if err = db.Ping(); err != nil {
+	//		panic(err)
+	//	}
 	if stmtInsertTcpLog, err = db.Prepare(`insert into tcp_log(username, proxy_type, client_addr, remote_addr, starttime) VALUES(?, ?, ?, ?, ?)`); err != nil {
 		panic(err)
 	}
@@ -67,7 +66,7 @@ func handleSQL() {
 		inter := <-CacheChan
 		switch inst := inter.(type) {
 		case *InsertTcpLogST:
-			atomic.StoreInt64(inst.tcpId, InsertTcpLog(inst.username, inst.proxyType, inst.clientAddr, inst.remoteAddr, inst.starttime))
+			inst.tcpId = InsertTcpLog(inst.username, inst.proxyType, inst.clientAddr, inst.remoteAddr, inst.starttime)
 		case *UpdateTcpST:
 			UpdateTcp(inst.id, inst.transfer)
 		case *InsertUpdateUdpLogST:

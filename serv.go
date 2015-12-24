@@ -51,11 +51,10 @@ func handleConnection(conn net.Conn) {
 		}
 	}()
 
-	conn.SetDeadline(time.Now().Add(20 * time.Second))
+	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 
-	var tcpId int64 = 0
 	socks5 := &proxy.Socks5{}
-	socks5.Conn, socks5.TcpId = conn, &tcpId
+	socks5.Conn = conn
 	ok = socks5.HandleSocks5()
 }
 

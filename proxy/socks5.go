@@ -50,13 +50,11 @@ func (s5 *Socks5) handleSocks5_() {
 		s5.Conn.Close()
 		s5.freeConn()
 
-		if s5.Info.logEnable {
-			if id := s5.getTcpId(); id > 0 {
-				if len(CacheChan) < cap(CacheChan) {
-					CacheChan <- &StopTcpST{id, time.Now().Format("2006-01-02 15:04:05")}
-				} else {
-					log.Printf("[%s][StopTcp]CacheChan is full drop tcpid %d\n", s5.User, id)
-				}
+		if s5.Info.logEnable && s5.TcpId > 0 {
+			if len(CacheChan) < cap(CacheChan) {
+				CacheChan <- &StopTcpST{s5.TcpId, time.Now().Format("2006-01-02 15:04:05")}
+			} else {
+				log.Printf("[%s][StopTcp]CacheChan is full drop tcpid %d\n", s5.User, s5.TcpId)
 			}
 		}
 	}()
@@ -230,7 +228,7 @@ func (s5 *Socks5) handleUDP() {
 
 	for {
 		buf := make([]byte, MAX_UDPBUF)
-		s5.UDPConn.SetDeadline(time.Now().Add(1 * time.Minute))
+		s5.UDPConn.SetReadDeadline(time.Now().Add(1 * time.Minute))
 		n, udpAddr, err := s5.UDPConn.ReadFromUDP(buf)
 		if err != nil {
 			if !isUseOfClosedConn(err) {
@@ -249,13 +247,11 @@ func (s5 *Socks5) handleUDP() {
 			data = append(data, buf...)
 			s5.UDPConn.WriteToUDP(data, rus.udpAddr)
 
-			if s5.Info.logEnable {
-				if id := s5.getTcpId(); id > 0 {
-					if len(CacheChan) < cap(CacheChan) {
-						CacheChan <- &InsertUpdateUdpLogST{id, udpAddr.String(), len(buf), time.Now().Format("2006-01-02 15:04:05")}
-					} else {
-						log.Printf("[%s][InsertUpdateUdpLogST]CacheChan is full drop tcpid %d\n", s5.User, id)
-					}
+			if s5.Info.logEnable && s5.TcpId > 0 {
+				if len(CacheChan) < cap(CacheChan) {
+					CacheChan <- &InsertUpdateUdpLogST{s5.TcpId, udpAddr.String(), len(buf), time.Now().Format("2006-01-02 15:04:05")}
+				} else {
+					log.Printf("[%s][InsertUpdateUdpLogST]CacheChan is full drop tcpid %d\n", s5.User, s5.TcpId)
 				}
 			}
 			atomic.AddInt64(&s5.Info.Transfer, int64(len(buf)))
@@ -298,13 +294,11 @@ func (s5 *Socks5) handleUDP() {
 
 			n, _ := s5.UDPConn.WriteToUDP(udpData, remoteAddr)
 
-			if s5.Info.logEnable {
-				if id := s5.getTcpId(); id > 0 {
-					if len(CacheChan) < cap(CacheChan) {
-						CacheChan <- &InsertUpdateUdpLogST{id, remoteAddr.String(), n, time.Now().Format("2006-01-02 15:04:05")}
-					} else {
-						log.Printf("[%s][InsertUpdateUdpLogST]CacheChan is full drop tcpid %d\n", s5.User, id)
-					}
+			if s5.Info.logEnable && s5.TcpId > 0 {
+				if len(CacheChan) < cap(CacheChan) {
+					CacheChan <- &InsertUpdateUdpLogST{s5.TcpId, remoteAddr.String(), n, time.Now().Format("2006-01-02 15:04:05")}
+				} else {
+					log.Printf("[%s][InsertUpdateUdpLogST]CacheChan is full drop tcpid %d\n", s5.User, s5.TcpId)
 				}
 			}
 			atomic.AddInt64(&s5.Info.Transfer, int64(n))
@@ -335,15 +329,6 @@ func (s5 *Socks5) handleConnect() {
 	copy(buf, []byte{0x05, 0x00, 0x00, 0x01})
 	copy(buf[4:], remoteaddr.ByteArray())
 	s5.Conn.Write(buf)
-
-	// reset deadline
-	if s5.TcpPort == 80 || s5.TcpPort == 443 {
-		s5.Conn.SetDeadline(time.Now().Add(10 * time.Second))
-		s5.Bconn.SetDeadline(time.Now().Add(10 * time.Second))
-	} else {
-		s5.Conn.SetDeadline(time.Now().Add(1 * time.Minute))
-		s5.Bconn.SetDeadline(time.Now().Add(1 * time.Minute))
-	}
 
 	if s5.Info.logEnable && len(CacheChan) < cap(CacheChan) {
 		CacheChan <- &InsertTcpLogST{s5.TcpId, s5.User, "TCP", s5.Conn.RemoteAddr().String(), s5.Target, time.Now().Format("2006-01-02 15:04:05")}

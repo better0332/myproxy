@@ -23,7 +23,7 @@ type UpdateTcpST struct {
 type InsertUpdateUdpLogST struct {
 	tid        int64
 	remoteAddr string
-	transfer   int
+	transfer   int64
 	addtime    string
 }
 
@@ -94,7 +94,7 @@ func StopTcp(id int64, endtime string) {
 	stmtStopTcp.Exec(endtime, id)
 }
 
-func InsertUpdateUdpLog(tid int64, remoteAddr string, transfer int, addtime string) {
+func InsertUpdateUdpLog(tid int64, remoteAddr string, transfer int64, addtime string) {
 	stmtInsertUpdateUdpLog.Exec(tid, remoteAddr, transfer, addtime, transfer)
 }
 

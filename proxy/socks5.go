@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const MAX_UDPBUF = 4 * 1024
+const MAX_UDPBUF = 4096
 
 type Socks5 struct {
 	Proxy
@@ -49,7 +49,7 @@ func (s5 *Socks5) handleSocks5_() {
 		//log.Printf("[%s]disconnected from frontend %s\n", s5.User, s5.Conn.RemoteAddr())
 		s5.Conn.Close()
 		s5.freeConn()
-		log.Println("--->", s5.Info, len(s5.Info.connMap))
+		//log.Println("--->", s5.Info, len(s5.Info.connMap))
 
 		if s5.Info.logEnable && *s5.TcpId > 0 {
 			if len(CacheChan) < cap(CacheChan) {
@@ -116,16 +116,14 @@ func (s5 *Socks5) handleSocks5_() {
 		s5.Target = fmt.Sprintf("%s:%d", s5.Domain, s5.TcpPort)
 
 		if !s5.concurrencyCheck() {
-			log.Printf("%s concurrencyCheck false\n", s5.User)
 			s5.Conn.Write(errorReplySocks5(0x05)) // connection refused
 			return
 		}
-		log.Println("+++>", s5.Info, len(s5.Info.connMap))
+		//log.Println("+++>", s5.Info, len(s5.Info.connMap))
 
 		s5.handleConnect()
 	} else if command == 0x03 { // 0x03: UDP ASSOCIATE
 		if !s5.concurrencyCheck() {
-			log.Printf("%s concurrencyCheck false\n", s5.User)
 			s5.Conn.Write(errorReplySocks5(0x05)) // connection refused
 			return
 		}
@@ -224,6 +222,17 @@ OUT:
 	return true
 }
 
+func (s5 *Socks5) upTransferUdp(sum int64, udpAddr string) {
+	atomic.AddInt64(&s5.Info.Transfer, sum)
+	if s5.Info.logEnable && *s5.TcpId > 0 {
+		if len(CacheChan) < cap(CacheChan) {
+			CacheChan <- &InsertUpdateUdpLogST{*s5.TcpId, udpAddr, sum, time.Now().Format("2006-01-02 15:04:05")}
+		} else {
+			log.Printf("[%s][InsertUpdateUdpLogST]CacheChan is full drop tcpid %d\n", s5.User, *s5.TcpId)
+		}
+	}
+}
+
 //Port Restricted Cone(NAT)
 func (s5 *Socks5) handleUDP() {
 	defer s5.Conn.Close()
@@ -242,21 +251,14 @@ func (s5 *Socks5) handleUDP() {
 		rus := s5.getConeMap(udpAddr.String())
 		if rus != nil {
 			// reply udp data to client
-			//log.Printf("[%s]%s reply udp data to client:[%q]\n", s5.User, udpAddr, buf)
+			// log.Printf("[%s]%s reply udp data to client:[%q]\n", s5.User, udpAddr, buf)
 
 			data := make([]byte, 0, len(rus.header)+len(buf))
 			data = append(data, rus.header...)
 			data = append(data, buf...)
 			s5.UDPConn.WriteToUDP(data, rus.udpAddr)
 
-			if s5.Info.logEnable && *s5.TcpId > 0 {
-				if len(CacheChan) < cap(CacheChan) {
-					CacheChan <- &InsertUpdateUdpLogST{*s5.TcpId, udpAddr.String(), len(buf), time.Now().Format("2006-01-02 15:04:05")}
-				} else {
-					log.Printf("[%s][InsertUpdateUdpLogST]CacheChan is full drop tcpid %d\n", s5.User, *s5.TcpId)
-				}
-			}
-			atomic.AddInt64(&s5.Info.Transfer, int64(len(buf)))
+			s5.upTransferUdp(int64(len(buf)), udpAddr.String())
 		} else {
 			//send udp data to server
 			if buf[0] != 0x00 || buf[1] != 0x00 || buf[2] != 0x00 {
@@ -296,14 +298,7 @@ func (s5 *Socks5) handleUDP() {
 
 			n, _ := s5.UDPConn.WriteToUDP(udpData, remoteAddr)
 
-			if s5.Info.logEnable && *s5.TcpId > 0 {
-				if len(CacheChan) < cap(CacheChan) {
-					CacheChan <- &InsertUpdateUdpLogST{*s5.TcpId, remoteAddr.String(), n, time.Now().Format("2006-01-02 15:04:05")}
-				} else {
-					log.Printf("[%s][InsertUpdateUdpLogST]CacheChan is full drop tcpid %d\n", s5.User, *s5.TcpId)
-				}
-			}
-			atomic.AddInt64(&s5.Info.Transfer, int64(n))
+			s5.upTransferUdp(int64(n), udpAddr.String())
 		}
 	}
 }
@@ -336,6 +331,5 @@ func (s5 *Socks5) handleConnect() {
 		CacheChan <- &InsertTcpLogST{s5.TcpId, s5.User, "TCP", s5.Conn.RemoteAddr().String(), s5.Target, time.Now().Format("2006-01-02 15:04:05")}
 	}
 
-	// proxying
 	s5.proxying()
 }

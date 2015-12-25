@@ -29,7 +29,8 @@ kankan.com
 ganji.com
 youtube.com
 speedtest
-proxycap.com
 cnzz.com
+proxycap.com
+sockscap64.com
 networktunnel.net
 localhost

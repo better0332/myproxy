@@ -123,7 +123,7 @@ func HandleAccountInfo(tCycle int64) []*accountInfo {
 			}
 
 			f := float64(info.duration) / float64(tCycle)
-			log.Println(f)
+			//log.Println(f)
 			if f > ratio {
 				info.timeAbnormal = time.Now().Unix()
 				log.Printf("[%s]concurrency overhead!\n", info.User)
@@ -330,12 +330,23 @@ func (proxy *Proxy) relayCheck(remoteIP net.IP) bool {
 }
 
 func (proxy *Proxy) resetDeadline() {
-	if proxy.TcpPort == 80 && proxy.TcpPort == 443 {
-		proxy.Conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-		proxy.Bconn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	if proxy.TcpPort == 80 || proxy.TcpPort == 443 {
+		proxy.Conn.SetDeadline(time.Now().Add(5 * time.Second))
+		proxy.Bconn.SetDeadline(time.Now().Add(5 * time.Second))
 	} else {
-		proxy.Conn.SetReadDeadline(time.Now().Add(1 * time.Minute))
-		proxy.Bconn.SetReadDeadline(time.Now().Add(1 * time.Minute))
+		proxy.Conn.SetDeadline(time.Now().Add(30 * time.Second))
+		proxy.Bconn.SetDeadline(time.Now().Add(30 * time.Second))
+	}
+}
+
+func (proxy *Proxy) upTransferTcp(sum int64) {
+	atomic.AddInt64(&proxy.Info.Transfer, sum)
+	if proxy.Info.logEnable && *proxy.TcpId > 0 {
+		if len(CacheChan) < cap(CacheChan) {
+			CacheChan <- &UpdateTcpST{*proxy.TcpId, sum}
+		} else {
+			log.Printf("[%s][UpdateTcpST]CacheChan is full drop tcpid %d\n", proxy.User, proxy.TcpId)
+		}
 	}
 }
 
@@ -346,20 +357,13 @@ func (proxy *Proxy) proxying() {
 		defer func() { proxy.Quit <- true }()
 
 		for {
-			proxy.resetDeadline()
-			n, err := io.CopyN(proxy.Bconn, proxy.Conn, 64<<10)
+			proxy.resetDeadline() // 由于io.CopyN的特性,跳出for循环超时时间为指定默认超时的倍数
+			n, err := io.CopyN(proxy.Bconn, proxy.Conn, 256<<10)
 			if n > 0 {
-				atomic.AddInt64(&proxy.Info.Transfer, n)
-				if proxy.Info.logEnable && *proxy.TcpId > 0 {
-					if len(CacheChan) < cap(CacheChan) {
-						CacheChan <- &UpdateTcpST{*proxy.TcpId, n}
-					} else {
-						log.Printf("[%s][UpdateTcpST]CacheChan is full drop tcpid %d\n", proxy.User, proxy.TcpId)
-					}
-				}
+				proxy.upTransferTcp(n)
 			}
 			if err != nil {
-				if isTimeoutConn(err) && n == 0 || !isTimeoutConn(err) {
+				if !isTimeoutConn(err) || n == 0 {
 					break
 				}
 			}
@@ -369,20 +373,13 @@ func (proxy *Proxy) proxying() {
 		defer func() { proxy.Quit <- true }()
 
 		for {
-			proxy.resetDeadline()
-			n, err := io.CopyN(proxy.Conn, proxy.Bconn, 64<<10)
+			proxy.resetDeadline() // 由于io.CopyN的特性,跳出for循环超时时间为指定默认超时的倍数
+			n, err := io.CopyN(proxy.Conn, proxy.Bconn, 256<<10)
 			if n > 0 {
-				atomic.AddInt64(&proxy.Info.Transfer, n)
-				if proxy.Info.logEnable && *proxy.TcpId > 0 {
-					if len(CacheChan) < cap(CacheChan) {
-						CacheChan <- &UpdateTcpST{*proxy.TcpId, n}
-					} else {
-						log.Printf("[%s][UpdateTcpST]CacheChan is full drop tcpid %d\n", proxy.User, proxy.TcpId)
-					}
-				}
+				proxy.upTransferTcp(n)
 			}
 			if err != nil {
-				if isTimeoutConn(err) && n == 0 || !isTimeoutConn(err) {
+				if !isTimeoutConn(err) || n == 0 {
 					break
 				}
 			}

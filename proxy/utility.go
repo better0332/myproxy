@@ -25,7 +25,8 @@ var (
 	blockTime uint
 	ratio     float64
 
-	account = accountMap{m: make(map[string]*accountInfo, 200)}
+	account  = accountMap{m: make(map[string]*accountInfo, 200)}
+	relayMap = relayServerMap{m: make(map[string][]net.IP, 16)}
 
 	udpRelayIpNets []*net.IPNet
 )
@@ -80,15 +81,56 @@ type Proxy struct {
 	Quit chan bool
 }
 
-type SockAddr struct {
-	Host string
-	Port int
+type relayServerMap struct {
+	m map[string][]net.IP
+	l sync.RWMutex
+}
+
+func GetRelayMapIPS(relayServer string) []net.IP {
+	relayMap.l.RLock()
+	defer relayMap.l.RUnlock()
+
+	return relayMap.m[relayServer]
+}
+
+func SetRelayMap(relayServer string) error {
+	ips, err := net.LookupIP(relayServer)
+	if err != nil {
+		return err
+	}
+	relayMap.l.Lock()
+	relayMap.m[relayServer] = ips
+	relayMap.l.Unlock()
+
+	return nil
+}
+
+func ParseRelay() {
+	tmp := relayServerMap{m: make(map[string][]net.IP, 16)}
+
+	relayMap.l.RLock()
+	for k, _ := range relayMap.m {
+		tmp.m[k] = nil
+	}
+	relayMap.l.RUnlock()
+
+	for k, _ := range tmp.m {
+		if ips, err := net.LookupIP(k); err == nil {
+			tmp.m[k] = ips
+		}
+	}
+
+	relayMap.l.Lock()
+	for k, v := range tmp.m {
+		relayMap.m[k] = v
+	}
+	relayMap.l.Unlock()
 }
 
 type accountInfo struct {
 	User        string
 	pwd         string
-	relayServer []net.IP
+	relayServer string
 	logEnable   bool
 
 	Transfer int64 //protect by sync/atomic
@@ -162,7 +204,7 @@ func GetAccountInfo(user string) *accountInfo {
 	return info
 }
 
-func SetAccount(user, pwd string, relayServer []net.IP, logEnable bool) {
+func SetAccount(user, pwd, relayServer string, logEnable bool) {
 	info := &accountInfo{
 		User:        user,
 		pwd:         pwd,
@@ -231,6 +273,11 @@ func isBlockPort(port uint) bool {
 	return port == 3077 || port == 3076 ||
 		port == 7777 || port == 7778 || port == 11300 ||
 		port == 4662 || port == 4661 || port == 4242 || port == 4371
+}
+
+type SockAddr struct {
+	Host string
+	Port int
 }
 
 // Convert a "host:port" string to SockAddr
@@ -321,7 +368,7 @@ func (proxy *Proxy) freeConn() {
 }
 
 func (proxy *Proxy) relayCheck(remoteIP net.IP) bool {
-	for _, ip := range proxy.Info.relayServer {
+	for _, ip := range GetRelayMapIPS(proxy.Info.relayServer) {
 		if bytes.Equal(remoteIP, ip) {
 			return true
 		}

@@ -111,18 +111,17 @@ func SetAccountMap(m map[string]*accountInfo, h string) {
 	defer rows.Close()
 
 	for rows.Next() {
-		var relayServer string
 		var logEnable int
 		info := accountInfo{connMap: make(map[net.Conn]int, 10)}
-		if err = rows.Scan(&info.User, &info.pwd, &relayServer, &logEnable); err != nil {
+		if err = rows.Scan(&info.User, &info.pwd, &info.relayServer, &logEnable); err != nil {
 			panic(err)
 		}
-		if relayServer != "" {
-			host, _, err := net.SplitHostPort(relayServer)
+		if info.relayServer != "" {
+			info.relayServer, _, err = net.SplitHostPort(info.relayServer)
 			if err != nil {
 				panic(err)
 			}
-			if info.relayServer, err = net.LookupIP(host); err != nil {
+			if err = SetRelayMap(info.relayServer); err != nil {
 				panic(err)
 			}
 		}

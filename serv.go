@@ -90,19 +90,19 @@ func accountSetHandler(w http.ResponseWriter, req *http.Request) {
 		bLog = true
 	}
 
-	var ips []net.IP
 	if relayServer != "" {
-		host, _, err := net.SplitHostPort(relayServer)
+		var err error
+		relayServer, _, err = net.SplitHostPort(relayServer)
 		if err != nil {
 			w.Write([]byte("relayServer format error!"))
 			return
 		}
-		if ips, err = net.LookupIP(host); err != nil {
+		if err = proxy.SetRelayMap(relayServer); err != nil {
 			w.Write([]byte("relayServer fail LookupIP!"))
 			return
 		}
 	}
-	proxy.SetAccount(user, pwd, ips, bLog)
+	proxy.SetAccount(user, pwd, relayServer, bLog)
 
 	w.Write([]byte("ok"))
 }
@@ -171,7 +171,17 @@ func cycleHandle() {
 	}
 }
 
+func parseRelayServer() {
+	for {
+		time.Sleep(30 * time.Minute)
+
+		proxy.ParseRelay()
+	}
+}
+
 func main() {
+	runtime.GOMAXPROCS(runtime.NumCPU())
+
 	flag.Parse()
 
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
@@ -201,16 +211,15 @@ func main() {
 	proxy.InitAccountMap(*hostname)
 	log.Println("initAccountMap ok")
 
-	runtime.GOMAXPROCS(runtime.NumCPU())
+	go httpServer()
+	go cycleHandle()
+	go parseRelayServer()
 
 	ln, err := net.Listen("tcp", *server)
 	if err != nil {
 		log.Fatal("Listen error: %s\n", err)
 	}
 	log.Printf("listening on %s...\n", *server)
-
-	go httpServer()
-	go cycleHandle()
 
 	for {
 		conn, err := ln.Accept()

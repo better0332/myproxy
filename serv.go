@@ -135,9 +135,32 @@ func accountDelHandler(w http.ResponseWriter, req *http.Request) {
 	w.Write([]byte("ok"))
 }
 
+func relayParseHandler(w http.ResponseWriter, req *http.Request) {
+	log.Println("enter relayParseHandler...")
+
+	timeStamp := req.Header.Get("timestamp")
+	token := req.Header.Get("token")
+
+	stamp, _ := strconv.ParseInt(timeStamp, 10, 0)
+	if time.Now().Unix()-stamp > 1800 {
+		w.Write([]byte("timestamp is expired!"))
+		return
+	}
+	t := fmt.Sprint("%x", md5.Sum([]byte(timeStamp+"^_^")))
+	if t != token {
+		w.Write([]byte("token is invalid!"))
+		return
+	}
+
+	proxy.ParseRelay()
+
+	w.Write([]byte("ok"))
+}
+
 func httpServer() {
 	http.HandleFunc("/account/set", accountSetHandler)
 	http.HandleFunc("/account/del", accountDelHandler)
+	http.HandleFunc("/relay/parse", relayParseHandler)
 
 	log.Fatal(http.ListenAndServe(":6061", nil))
 }
@@ -168,14 +191,6 @@ func cycleHandle() {
 		} else {
 			log.Println("post user info fail:", resp.Status)
 		}
-	}
-}
-
-func parseRelayServer() {
-	for {
-		time.Sleep(30 * time.Minute)
-
-		proxy.ParseRelay()
 	}
 }
 
@@ -213,7 +228,6 @@ func main() {
 
 	go httpServer()
 	go cycleHandle()
-	go parseRelayServer()
 
 	ln, err := net.Listen("tcp", *server)
 	if err != nil {

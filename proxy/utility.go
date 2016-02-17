@@ -76,7 +76,9 @@ type Proxy struct {
 	Domain  string
 	TcpPort uint
 
-	TcpId *int64 //race detect
+	OnceTcpId sync.Once
+	ChTcpId   chan bool
+	TcpId     int64
 
 	Quit chan bool
 }
@@ -388,11 +390,11 @@ func (proxy *Proxy) resetDeadline() {
 
 func (proxy *Proxy) upTransferTcp(sum int64) {
 	atomic.AddInt64(&proxy.Info.Transfer, sum)
-	if proxy.Info.logEnable && *proxy.TcpId > 0 {
-		if len(CacheChan) < cap(CacheChan) {
-			CacheChan <- &UpdateTcpST{*proxy.TcpId, sum}
-		} else {
-			log.Printf("[%s][UpdateTcpST]CacheChan is full drop tcpid %d\n", proxy.User, proxy.TcpId)
+	if proxy.Info.logEnable {
+		proxy.OnceTcpId.Do(func() { <-proxy.ChTcpId })
+
+		if proxy.TcpId > 0 {
+			go UpdateTcp(proxy.TcpId, sum)
 		}
 	}
 }

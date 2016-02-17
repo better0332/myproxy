@@ -53,10 +53,8 @@ func handleConnection(conn net.Conn) {
 
 	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 
-	var TcpId int64 = 0
 	socks5 := &proxy.Socks5{}
 	socks5.Conn = conn
-	socks5.TcpId = &TcpId
 	ok = socks5.HandleSocks5()
 }
 
@@ -195,11 +193,7 @@ func cycleHandle() {
 }
 
 func main() {
-	runtime.GOMAXPROCS(runtime.NumCPU())
-
 	flag.Parse()
-
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
 	var err error
 
@@ -218,6 +212,10 @@ func main() {
 			}
 		}
 	}
+
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+
+	runtime.GOMAXPROCS(runtime.NumCPU())
 
 	if err = proxy.SetBlockDomain(*blockDomain); err != nil {
 		log.Fatal(err)

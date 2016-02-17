@@ -9,28 +9,6 @@ import (
 
 var db *sql.DB
 var stmtInsertTcpLog, stmtUpdateTcp, stmtStopTcp, stmtInsertUpdateUdpLog *sql.Stmt
-var CacheChan = make(chan interface{}, 2000)
-
-type InsertTcpLogST struct {
-	tcpId                                                  *int64
-	username, proxyType, clientAddr, remoteAddr, starttime string
-}
-
-type UpdateTcpST struct {
-	id, transfer int64
-}
-
-type InsertUpdateUdpLogST struct {
-	tid        int64
-	remoteAddr string
-	transfer   int64
-	addtime    string
-}
-
-type StopTcpST struct {
-	id      int64
-	endtime string
-}
 
 func init() {
 	var err error
@@ -43,42 +21,22 @@ func init() {
 	//	if err = db.Ping(); err != nil {
 	//		panic(err)
 	//	}
-	if stmtInsertTcpLog, err = db.Prepare(`insert into tcp_log(username, proxy_type, client_addr, remote_addr, starttime) VALUES(?, ?, ?, ?, ?)`); err != nil {
+	if stmtInsertTcpLog, err = db.Prepare(`insert into tcp_log(username, proxy_type, client_addr, remote_addr, starttime) VALUES(?, ?, ?, ?, now())`); err != nil {
 		panic(err)
 	}
 	if stmtUpdateTcp, err = db.Prepare(`update tcp_log set transfer=transfer+? where id=?`); err != nil {
 		panic(err)
 	}
-	if stmtStopTcp, err = db.Prepare(`update tcp_log set endtime=? where id=?`); err != nil {
+	if stmtStopTcp, err = db.Prepare(`update tcp_log set endtime=now() where id=?`); err != nil {
 		panic(err)
 	}
-	if stmtInsertUpdateUdpLog, err = db.Prepare(`insert into udp_log(tid, remote_addr, transfer, addtime) VALUES(?, ?, ?, ?) on duplicate key update transfer=transfer+?`); err != nil {
+	if stmtInsertUpdateUdpLog, err = db.Prepare(`insert into udp_log(tid, remote_addr, transfer, addtime) VALUES(?, ?, ?, now()) on duplicate key update transfer=transfer+?`); err != nil {
 		panic(err)
-	}
-
-	for i := 0; i < 8; i++ {
-		go handleSQL()
 	}
 }
 
-func handleSQL() {
-	for {
-		inter := <-CacheChan
-		switch inst := inter.(type) {
-		case *InsertTcpLogST:
-			*inst.tcpId = InsertTcpLog(inst.username, inst.proxyType, inst.clientAddr, inst.remoteAddr, inst.starttime)
-		case *UpdateTcpST:
-			UpdateTcp(inst.id, inst.transfer)
-		case *InsertUpdateUdpLogST:
-			InsertUpdateUdpLog(inst.tid, inst.remoteAddr, inst.transfer, inst.addtime)
-		case *StopTcpST:
-			StopTcp(inst.id, inst.endtime)
-		}
-	}
-}
-
-func InsertTcpLog(username, proxyType, clientAddr, remoteAddr, starttime string) int64 {
-	rlt, err := stmtInsertTcpLog.Exec(username, proxyType, clientAddr, remoteAddr, starttime)
+func InsertTcpLog(username, proxyType, clientAddr, remoteAddr string) int64 {
+	rlt, err := stmtInsertTcpLog.Exec(username, proxyType, clientAddr, remoteAddr)
 	if err != nil {
 		return 0
 	}
@@ -90,12 +48,12 @@ func UpdateTcp(id, transfer int64) {
 	stmtUpdateTcp.Exec(transfer, id)
 }
 
-func StopTcp(id int64, endtime string) {
-	stmtStopTcp.Exec(endtime, id)
+func StopTcp(id int64) {
+	stmtStopTcp.Exec(id)
 }
 
-func InsertUpdateUdpLog(tid int64, remoteAddr string, transfer int64, addtime string) {
-	stmtInsertUpdateUdpLog.Exec(tid, remoteAddr, transfer, addtime, transfer)
+func InsertUpdateUdpLog(tid int64, remoteAddr string, transfer int64) {
+	stmtInsertUpdateUdpLog.Exec(tid, remoteAddr, transfer, transfer)
 }
 
 func SetAccountMap(m map[string]*accountInfo, h string) {

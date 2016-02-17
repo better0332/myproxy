@@ -50,14 +50,6 @@ func (s5 *Socks5) handleSocks5_() {
 		s5.Conn.Close()
 		s5.freeConn()
 		//log.Println("--->", s5.Info, len(s5.Info.connMap))
-
-		if s5.Info.logEnable && *s5.TcpId > 0 {
-			if len(CacheChan) < cap(CacheChan) {
-				CacheChan <- &StopTcpST{*s5.TcpId, time.Now().Format("2006-01-02 15:04:05")}
-			} else {
-				log.Printf("[%s][StopTcp]CacheChan is full drop tcpid %d\n", s5.User, *s5.TcpId)
-			}
-		}
 	}()
 
 	// RelayCheck
@@ -158,8 +150,20 @@ func (s5 *Socks5) handleSocks5_() {
 		s5.Conn.SetDeadline(time.Time{})
 		s5.newConeMap()
 
-		if s5.Info.logEnable && len(CacheChan) < cap(CacheChan) {
-			CacheChan <- &InsertTcpLogST{s5.TcpId, s5.User, "UDP", s5.Conn.RemoteAddr().String(), "", time.Now().Format("2006-01-02 15:04:05")}
+		if s5.Info.logEnable {
+			defer func() {
+				s5.OnceTcpId.Do(func() { <-s5.ChTcpId })
+
+				if s5.TcpId > 0 {
+					go StopTcp(s5.TcpId)
+				}
+			}()
+
+			s5.ChTcpId = make(chan bool, 1)
+			go func() {
+				defer func() { s5.ChTcpId <- true }()
+				s5.TcpId = InsertTcpLog(s5.User, "UDP", s5.Conn.RemoteAddr().String(), "")
+			}()
 		}
 
 		go s5.handleUDP()
@@ -224,11 +228,11 @@ OUT:
 
 func (s5 *Socks5) upTransferUdp(sum int64, udpAddr string) {
 	atomic.AddInt64(&s5.Info.Transfer, sum)
-	if s5.Info.logEnable && *s5.TcpId > 0 {
-		if len(CacheChan) < cap(CacheChan) {
-			CacheChan <- &InsertUpdateUdpLogST{*s5.TcpId, udpAddr, sum, time.Now().Format("2006-01-02 15:04:05")}
-		} else {
-			log.Printf("[%s][InsertUpdateUdpLogST]CacheChan is full drop tcpid %d\n", s5.User, *s5.TcpId)
+	if s5.Info.logEnable {
+		s5.OnceTcpId.Do(func() { <-s5.ChTcpId })
+
+		if s5.TcpId > 0 {
+			go InsertUpdateUdpLog(s5.TcpId, udpAddr, sum)
 		}
 	}
 }
@@ -327,8 +331,21 @@ func (s5 *Socks5) handleConnect() {
 	copy(buf[4:], remoteaddr.ByteArray())
 	s5.Conn.Write(buf)
 
-	if s5.Info.logEnable && len(CacheChan) < cap(CacheChan) {
-		CacheChan <- &InsertTcpLogST{s5.TcpId, s5.User, "TCP", s5.Conn.RemoteAddr().String(), s5.Target, time.Now().Format("2006-01-02 15:04:05")}
+	if s5.Info.logEnable {
+		defer func() {
+			s5.OnceTcpId.Do(func() { <-s5.ChTcpId })
+
+			if s5.TcpId > 0 {
+				go StopTcp(s5.TcpId)
+			}
+		}()
+
+		s5.ChTcpId = make(chan bool, 1)
+		go func() {
+			defer func() { s5.ChTcpId <- true }()
+
+			s5.TcpId = InsertTcpLog(s5.User, "TCP", s5.Conn.RemoteAddr().String(), s5.Target)
+		}()
 	}
 
 	s5.proxying()

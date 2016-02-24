@@ -34,4 +34,7 @@ cnzz.com
 proxycap.com
 sockscap64.com
 networktunnel.net
+ntdtv.com
+epochtimes.com
+boxun.com
 localhost

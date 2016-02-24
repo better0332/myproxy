@@ -28,6 +28,7 @@ kankan.com
 58.com
 ganji.com
 youtube.com
+dropbox.com
 google.com
 speedtest
 cnzz.com

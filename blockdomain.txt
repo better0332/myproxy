@@ -13,7 +13,7 @@ cntv.cn
 taobao.com
 jd.com
 tmall.com
-sina.com.cn
+sina.com
 onlinedown.net
 skycn.com
 xunlei.com
@@ -28,6 +28,7 @@ kankan.com
 58.com
 ganji.com
 youtube.com
+google.com
 speedtest
 cnzz.com
 proxycap.com
